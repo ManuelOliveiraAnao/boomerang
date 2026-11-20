@@ -84,6 +84,70 @@ def _section(kicker: str, title: str, lead: str) -> None:
     """)
 
 
+# Traffic-light rules, from docs/02 §4 (B's boomerang/assess.py). Each row:
+# (service, feature, why it gets this light, what happens self-hosted, what handles it)
+_LIGHTS = [
+    ("green", "Config only", "Same API on the other side. Only the endpoint and keys change.", [
+        ("S3", "Basic object operations", "put, get, list, delete and head work the same on any S3-compatible store.",
+         "S3-compatible object storage: SeaweedFS, or Leaseweb Object Storage", "Storage adapter, config only"),
+    ]),
+    ("amber", "Moves via adapter", "Moves through a small, tested adapter. Every behaviour difference is listed.", [
+        ("DynamoDB", "Items, queries on key or GSI", "Postgres through the kv adapter, which mimics boto3's Table calls.",
+         "Postgres. GSIs become indexes; numbers come back as Decimal, like boto3", "sovereign_sdk.kv"),
+        ("DynamoDB", "Conditional writes", "Only attribute_not_exists and attribute_exists are supported.",
+         "Same check in Postgres; a failure raises ConditionalCheckFailedException", "sovereign_sdk.kv"),
+        ("SQS", "Standard queues, retries, DLQ", "Send, receive, delete, visibility timeout and maxReceiveCount.",
+         "RabbitMQ quorum queue with a dead-letter exchange", "sovereign_sdk.queue"),
+        ("S3", "Presigned URLs, versioning, lifecycle", "Supported differently, or needs configuring on the target.",
+         "Listed in the plan with what to set up", "Review in the plan"),
+    ]),
+    ("red", "Needs a human", "No safe automatic equivalent. Flagged, explained and left for a person.", [
+        ("IAM", "Roles, instance profiles, policies", "Permissions can't be translated one to one.",
+         "Replaced by generated credentials scoped to one database, vhost and bucket", "Human review"),
+        ("Lambda", "Functions and triggers", "Serverless functions have no drop-in equivalent here.",
+         "Flagged, not migrated", "Human"),
+        ("S3", "Event notifications", "Events that call Lambda or SQS aren't wired up on the target.",
+         "Flagged, not migrated", "Human"),
+        ("DynamoDB", "Transactions, streams, TTL, PartiQL", "Outside what the kv adapter supports.",
+         "The adapter raises UnsupportedFeature instead of guessing", "Human"),
+        ("SQS", "FIFO, attribute filters, delays", "Outside what the queue adapter supports.",
+         "Flagged, not migrated", "Human"),
+    ]),
+]
+
+
+def _lights_board() -> str:
+    order = ["green", "amber", "red"]
+    cols = []
+    for key, label, blurb, rows in _LIGHTS:
+        signal = "".join(f'<i class="{"lit" if k == key else ""}"></i>' for k in order)
+        items = "".join(
+            f'<div class="lt-row" tabindex="0">'
+            f'<span class="lt-svc">{svc}</span><span class="lt-feat">{feat}</span>'
+            f'<span class="lt-chev" aria-hidden="true">›</span>'
+            f'<div class="lt-pop" role="tooltip">'
+            f'<div class="lt-pop-h"><span class="lt-pop-l">{label}</span><span class="lt-pop-s">{svc}</span></div>'
+            f'<div class="lt-pop-t">{feat}</div>'
+            f'<div class="lt-kv"><span>Why</span><p>{why}</p></div>'
+            f'<div class="lt-kv"><span>Self-hosted</span><p>{target}</p></div>'
+            f'<div class="lt-kv"><span>Handled by</span><p><code>{by}</code></p></div>'
+            f'</div></div>'
+            for svc, feat, why, target, by in rows
+        )
+        cols.append(
+            f'<div class="lt-col" style="--c:{LIGHT_COLORS[key]}">'
+            f'<div class="lt-head"><span class="lt-signal">{signal}</span>'
+            f'<div><div class="lt-label">{label}</div>'
+            f'<div class="lt-count">{len(rows)} rule{"s" if len(rows) != 1 else ""}</div></div></div>'
+            f'<p class="lt-blurb">{blurb}</p><div class="lt-rows">{items}</div></div>'
+        )
+    return (
+        '<div class="lt-board">' + "".join(cols) + "</div>"
+        '<div class="lt-note"><span>Rules decide the light.</span> The AI only writes the explanation, '
+        "and it may raise a light, never lower it. Hover or tap a rule for details.</div>"
+    )
+
+
 def render() -> None:
     motion.inject()
 
@@ -99,7 +163,8 @@ def render() -> None:
         <div class="bm-title">Leave AWS.<br>Prove it works. Come back.</div>
         <div class="bm-sub">
           Boomerang scans an AWS app, shows exactly what will break, moves it to a ready-to-run
-          <span class="bm-lw">Leaseweb</span> setup with a <b>local AI model</b>, proves it with the
+          self-hosted setup (your own servers, or a provider such as <span class="bm-lw">Leaseweb</span>)
+          with a <b>local AI model</b>, proves it with the
           app's own tests, moves the data, and can take it all back to
           <span class="bm-aws">AWS</span>.
         </div>
@@ -112,7 +177,7 @@ def render() -> None:
       <div class="lp-stats">
         <div class="lp-stat"><b>Local AI</b><span>The model runs on your laptop. Code and keys stay home.</span></div>
         <div class="lp-stat"><b>Your tests</b><span>The app's original tests are the proof. AI never edits them.</span></div>
-        <div class="lp-stat"><b>Round trip</b><span>AWS → Leaseweb → AWS, data included, counts checked.</span></div>
+        <div class="lp-stat"><b>Round trip</b><span>AWS → your servers → AWS, data included, counts checked.</span></div>
         <div class="lp-stat"><b>Honest costs</b><span>Published prices with sources, plus the hours to run it yourself.</span></div>
       </div>
     """)
@@ -139,28 +204,58 @@ def render() -> None:
         for art, t, d in problems) + "</div>")
 
     # ---------------- how it works ----------------
-    _section(
-        "How it works",
-        "From AWS app to verified Leaseweb setup, in nine steps.",
-        "Rules and templates do everything that must be exact. The AI only does what needs "
-        "reading unfamiliar code, and every AI output is checked before it is used.",
-    )
+    # A scroll-driven timeline: the heading stays pinned on the left while the
+    # boomerang travels down the rail on the right, lighting each step it passes.
+    # (title, description, who does it, uses AI, what it produces)
     steps = [
-        ("Scan", "Finds every AWS dependency in code, Terraform, Dockerfile and env, with file and line.", "AI + static analysis", True),
-        ("Traffic lights", "Labels each service and feature green, amber or red. Rules decide; AI only explains.", "Rules", False),
-        ("Approve", "A human reviews the plan. Nothing is written before approval.", "Human", False),
-        ("De-lock", "Rewrites each function that calls AWS onto small, pre-tested adapters. S3 is just a config change.", "AI per function", True),
-        ("Leaseweb files", "Generates docker-compose, cloud-init, deploy script, backups, scoped credentials and DEPLOY.md.", "Templates", False),
-        ("Verify live", "Files valid → stack boots → the app's original tests pass → health check.", "Plain code", False),
-        ("Move data", "Copies items, objects and pending messages; compares counts and checksums.", "Plain code", False),
-        ("Round trip", "Back to AWS with the original code and data copied back, tests again, and a list of what got lost.", "Plain code", False),
-        ("Costs", "AWS vs Leaseweb with published prices, your usage and the ops hours to run it yourself.", "Plain code", False),
+        ("Scan", "Finds every AWS dependency in code, Terraform, Dockerfile and env, with file and line.",
+         "Static analysis + AI", True, "pam.json"),
+        ("Traffic lights", "Labels each service and feature green, amber or red. Rules decide; the AI only explains.",
+         "Rules", False, "assessment.json"),
+        ("Approve", "A human reviews the plan. Nothing is written before approval.",
+         "Human", False, "approval.json"),
+        ("De-lock", "Rewrites each function that calls AWS onto small, pre-tested adapters. S3 is just a config change.",
+         "AI, one function at a time", True, "delock.json · diffs/"),
+        ("Self-hosted files", "Generates docker-compose, cloud-init, a deploy script, backups, scoped credentials and DEPLOY.md. Runs on any server with Docker; Leaseweb is our example.",
+         "Templates", False, "leaseweb/"),
+        ("Verify", "Files valid, stack boots, the app's original tests pass, health check answers.",
+         "Plain code", False, "tests passed"),
+        ("Move data", "Copies items, objects and pending messages, then compares counts and checksums.",
+         "Plain code", False, "counts + checksums"),
+        ("Round trip", "Back to AWS with the original code and the data copied back, tests again, and a list of what got lost.",
+         "Plain code", False, "what got lost"),
+        ("Costs", "AWS against Leaseweb with published prices, your usage and the ops hours to run it yourself.",
+         "Plain code", False, "cost estimate"),
     ]
-    _html('<div class="lp-steps">' + "".join(
-        f'<div class="lp-step"><div class="num"></div><div><b>{t}</b><p>{d}</p>'
-        f'<span class="lp-tag {"ai" if ai else ""}">{tag}</span></div></div>'
-        for t, d, tag, ai in steps
-    ) + "</div>")
+    phases = [("Plan", "01–03"), ("Build", "04–05"), ("Prove", "06–09")]
+    side = (
+        '<div class="tl-side">'
+        '<div class="lp-kicker">How it works</div>'
+        '<div class="lp-h2">From AWS app to a verified self-hosted setup, in nine steps.</div>'
+        '<div class="lp-lead">Rules and templates do everything that must be exact. The AI only does what '
+        'needs reading unfamiliar code, and every AI output is checked before it is used.</div>'
+        '<div class="tl-read"><span class="tl-cur">01</span><span class="tl-of">/ 09</span></div>'
+        f'<div class="tl-name">{steps[0][0]}</div>'
+        '<div class="tl-bar"><i></i></div>'
+        '<div class="tl-phases">' + "".join(
+            f'<div class="tl-phase{" on" if i == 0 else ""}"><b>{p}</b><span>{r}</span></div>'
+            for i, (p, r) in enumerate(phases)) + '</div>'
+        '</div>'
+    )
+    items = "".join(
+        f'<div class="tl-step"><span class="tl-node"></span>'
+        f'<div class="tl-meta"><span class="tl-n">{i:02d}</span>'
+        f'<span class="tl-kind{" ai" if ai else ""}">{kind}</span></div>'
+        f'<div class="tl-title">{t}</div><p>{d}</p>'
+        f'<div class="tl-out"><span>Output</span><code>{out}</code></div></div>'
+        for i, (t, d, kind, ai, out) in enumerate(steps, 1)
+    )
+    _html(
+        '<div class="lp-section lp-tl">' + side +
+        '<div class="tl-list"><div class="tl-rail"><i class="tl-fill"></i></div>'
+        f'<div class="tl-mark"><span class="tl-boom">{logo_svg(20)}</span></div>'
+        + items + '</div></div>'
+    )
 
     # ---------------- traffic lights ----------------
     _section(
@@ -169,20 +264,7 @@ def render() -> None:
         "Every AWS service and feature the app uses gets one of three lights. Reds are flagged "
         "for a human; Boomerang never pretends to migrate them.",
     )
-    g, a, r = LIGHT_COLORS["green"], LIGHT_COLORS["amber"], LIGHT_COLORS["red"]
-    _html(f"""
-      <div class="lp-grid">
-        <div class="lp-card lp-light" style="--c:{g}"><span class="dot"></span><h3>Config only</h3>
-          <p>Same API on the other side; only endpoints and keys change.</p>
-          <ul><li>S3 → S3-compatible object storage</li></ul></div>
-        <div class="lp-card lp-light" style="--c:{a}"><span class="dot"></span><h3>Moves via adapter</h3>
-          <p>Moves through a tested adapter. Every behaviour difference is listed.</p>
-          <ul><li>DynamoDB → Postgres</li><li>SQS → RabbitMQ (retries, dead-letter queue)</li></ul></div>
-        <div class="lp-card lp-light" style="--c:{r}"><span class="dot"></span><h3>Needs a human</h3>
-          <p>No safe automatic equivalent. Flagged, explained and left for a person.</p>
-          <ul><li>Lambda triggers</li><li>IAM roles and policies</li><li>CloudWatch alarms</li></ul></div>
-      </div>
-    """)
+    _html(_lights_board())
 
     # ---------------- round trip ----------------
     _section(
@@ -196,8 +278,8 @@ def render() -> None:
         <div class="lp-stop"><div class="where bm-aws">AWS</div>
           <div class="what">Original app and data. Scanned, never modified.</div></div>
         <div class="lp-arrow">→</div>
-        <div class="lp-stop"><div class="where bm-lw">Leaseweb</div>
-          <div class="what">Generated setup boots; original tests pass; data counts and checksums match.</div></div>
+        <div class="lp-stop"><div class="where bm-lw">Self-hosted</div>
+          <div class="what">Your servers, or a provider such as Leaseweb. Generated setup boots; original tests pass; data counts and checksums match.</div></div>
         <div class="lp-arrow">→</div>
         <div class="lp-stop"><div class="where bm-aws">Back to AWS</div>
           <div class="what">Original code, data copied back, tests again, and an explicit "what got lost" list.</div></div>

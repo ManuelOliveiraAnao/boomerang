@@ -164,11 +164,17 @@ def logo_svg(height: int = 22, mono: str | None = None) -> str:
     return svg.replace("<svg ", f'<svg height="{height}" style="display:block" ', 1)
 
 
+def wordmark_svg(height: int = 26, dark_text: bool = False) -> str:
+    """Inline wordmark: pixel mark + "Boomerang" (Inter SemiBold as outlines)."""
+    svg = (ASSETS / ("wordmark-dark.svg" if dark_text else "wordmark.svg")).read_text(encoding="utf-8")
+    svg = svg.replace('width="', 'data-w="', 1).replace('height="', 'data-h="', 1)
+    return svg.replace("<svg ", f'<svg height="{height}" style="display:block;width:auto" ', 1)
+
+
 BRAND_HTML = (
-    '<div style="display:flex;align-items:center;gap:10px;margin:4px 0 18px">'
-    f'{logo_svg(26)}'
-    '<div><div style="font-weight:600;color:#F7F8F8;letter-spacing:-0.015em">Boomerang</div>'
-    '<div style="font-size:0.75rem;color:#8A8F98">AWS ⇄ Leaseweb</div></div></div>'
+    '<div style="margin:4px 0 18px">'
+    f'{wordmark_svg(26)}'
+    '<div style="font-size:0.75rem;color:#8A8F98;margin:6px 0 0 2px">AWS ⇄ Leaseweb</div></div>'
 )
 
 _LANDING_CSS = f"""

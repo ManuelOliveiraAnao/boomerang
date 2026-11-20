@@ -25,10 +25,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 theme.inject_css()
-st.logo(str(theme.ASSETS / "logo.svg"), size="medium")
-
-with st.sidebar:
-    st.markdown(theme.BRAND_HTML, unsafe_allow_html=True)
+st.logo(str(theme.ASSETS / "wordmark.svg"), icon_image=str(theme.ASSETS / "logo.svg"), size="large")
 
 home = st.Page(landing.render, title="Overview", default=True)
 app = st.Page(dashboard.render, title="Dashboard", url_path="dashboard")

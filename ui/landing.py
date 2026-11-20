@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ui.theme import LIGHT_COLORS, logo_svg
+from ui.theme import LIGHT_COLORS, logo_svg, wordmark_svg
 
 
 def _html(s: str) -> None:
@@ -259,4 +259,5 @@ def render() -> None:
     """)
     st.write("")
     _go_dashboard("cta_bottom")
-    _html(f'<div class="lp-foot"><span style="display:inline-block;vertical-align:middle;margin-right:6px">{logo_svg(14)}</span>Boomerang · InfraHack 2026 · Leaseweb × Velv · Apache-2.0</div>')
+    _html(f'<div class="lp-foot"><div style="display:flex;justify-content:center;margin-bottom:10px">'
+          f'{wordmark_svg(22)}</div>InfraHack 2026 · Leaseweb × Velv · Apache-2.0</div>')

@@ -38,6 +38,7 @@ class Settings(BaseModel):
     repo_root: Path = REPO_ROOT
     prompts_dir: Path = REPO_ROOT / "prompts"
     anthropic_api_key: SecretStr | None = None
+    dotenv_path: Path | None = None       # the `.env` that was read; redact.secret_values() scans it and its `.env*` siblings
 
     @property
     def llm_badge(self) -> str:
@@ -122,6 +123,7 @@ def load_settings(environ: dict[str, str] | None = None, dotenv_path: Path | Non
         auto_approve=_bool("BOOMERANG_AUTO_APPROVE", get("BOOMERANG_AUTO_APPROVE"), False),
         allow_fixtures=_bool("BOOMERANG_ALLOW_FIXTURES", get("BOOMERANG_ALLOW_FIXTURES"), False),
         anthropic_api_key=SecretStr(api_key) if api_key else None,
+        dotenv_path=dotenv_path,
     )
 
 

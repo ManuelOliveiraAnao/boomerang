@@ -41,8 +41,20 @@ def test_unbuilt_command_exits_3_and_names_the_owner(tmp_path):
     assert result.exit_code == 3 and "not built yet" in result.output and "owner B" in result.output
     result = runner.invoke(app, ["migrate", str(tmp_path), "--yes"])
     assert result.exit_code == 3 and "owner C" in result.output
+
+
+def test_llm_check_answers_with_a_fake_model(fake_llm):
+    fake_llm.responses["llm-check"] = lambda call: call["schema"](analysis="2 + 3 is 5.", answer=5)
     result = runner.invoke(app, ["llm-check"])
-    assert result.exit_code == 3 and "llm.structured" in result.output
+    assert result.exit_code == 0 and "answer=5" in result.output
+    assert "ollama · qwen2.5-coder:7b · local" in result.output
+
+
+def test_llm_check_replay_miss_exits_3(monkeypatch):
+    monkeypatch.setenv("BOOMERANG_LLM_MODE", "replay")
+    get_settings.cache_clear()
+    result = runner.invoke(app, ["llm-check"])
+    assert result.exit_code == 3 and "CacheMiss" in result.output
 
 
 def test_unknown_run_exits_3():

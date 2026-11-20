@@ -71,8 +71,18 @@ class Incident(BaseModel):                         # piece 3 writes it to runs/<
     explanation: str = ""                          # the AI's plain words (empty if the model is unavailable)
     severity: Literal["degraded", "down"]          # = diagnosis.severity, or raised by the AI
     llm: str = ""                                  # config.Settings.llm_badge
-    applied: list[dict[str, Any]] = []             # [{"action": Action, "by": "ui", "at": ts, "ok": bool, "detail": str}]
+    applied: list[AppliedAction] = []              # each: {"action": Action, "by": "ui", "at": ts, "ok": bool, "detail": str}
+    resolved_at: float | None = None               # set when a later check finds the stack healthy again
+
+class AppliedAction(BaseModel):                    # same keys as the dict above, typed
+    action: Action; by: str; at: float; ok: bool; detail: str = ""
+
+class DoctorExplanation(BaseModel):                # LLM-facing (piece 3): the AI explains, it never decides
+    explanation: str; raise_severity: bool = False
 ```
+
+**In `models.py` now (piece 3, `doctor-c`).** Two additions to the original draft: `AppliedAction` types the
+`applied` entries (the JSON keys are unchanged), and `resolved_at` lets the UI tell an open incident from a fixed one.
 
 **Mapping used by all pieces** (compose service ↔ PAM component kind):
 
@@ -189,6 +199,23 @@ skip; `move_back` never offered for the last self-hosted component; the order of
 **Done when:** every rule has a test, and `diagnose()` on piece 1's "Postgres stopped" signals returns `db_down`,
 `component_id="orders"`, impact containing "Checkout", and `restart_service postgres` as the first action.
 
+> **Status: done** on branch `doctor-b` (built by C for B). `boomerang/doctor/rules.py`, `tests/test_doctor_rules.py`
+> (18 tests). Differences from the plan above:
+> - `diagnose(signals, pam, scope, *, app_dir=None)`. The orchestrator passes `runs/<id>/original`, and the impact
+>   names the routes that reach the component, read from the entrypoint with `ast`: `orders` gives
+>   "Create order (POST /orders)", "Get order (GET /orders/{order_id})" and
+>   "List customer orders (GET /customers/{customer_id}/orders)". That works for any scanned app, not just ShopLite.
+>   Without `app_dir`, or if the routes can't be read, it says "Everything that uses orders".
+> - `relevant(signals, pam, scope)`: on a hybrid run, drops the signals of a backing service that no self-hosted
+>   component uses. Piece 1 reports such a service as "not created" with a refused port, and without this filter the
+>   Doctor would raise a false incident. The orchestrator filters with it before deciding "healthy".
+> - A `stack_unreachable` rule comes first: piece 1 reports "no Docker" as service `"stack"`, and nothing else can be
+>   judged then.
+> - `config_error` runs **before** `app_crash`: a missing setting is usually why the app crashes on start, and the
+>   error names the setting.
+> - `db_down` still needs the app to be hurt (api logs or health failing). Postgres down with a healthy app → `unknown`.
+> - `reverify`'s target is `"stack"` (piece 1 ignores it).
+
 ---
 
 ## 5. Piece 3 · Contract, AI explanation, CLI: C (Joao)
@@ -239,12 +266,46 @@ an incident without explanation; CLI exit codes.
 **Done when:** `boomerang doctor break <id> postgres` then `boomerang doctor <id>` prints `db_down` with an
 explanation, and `boomerang doctor fix <id> restart_service postgres --by cli` brings the health check back.
 
+### 5.6 Status (branch `doctor-c`)
+
+Built and tested (`tests/test_doctor.py`, 22 tests; full suite green). The end-to-end "done when" above needs
+pieces 1 and 2, and Docker.
+
+| Part | Where | Notes |
+|---|---|---|
+| Contract | `boomerang/models.py` | §2, plus `AppliedAction` and `resolved_at`; `"doctor"` added to `Stage` |
+| Orchestrator | `boomerang/doctor/__init__.py` | `run()`, `fix()`, `explain()`, `load()`, `break_service()` |
+| AI prompt | `prompts/doctor.md` | `DoctorExplanation` added to the demo cache's `LLM_SCHEMAS` |
+| CLI | `boomerang/cli.py` | `doctor <id>` (alias of `doctor diagnose <id>`), `doctor fix`, `doctor break` |
+
+**How A's and B's code plugs in.** The orchestrator imports `boomerang.doctor.signals`, `.actions` and `.rules`
+only when it calls them, with exactly the signatures in §3 and §4:
+`signals.collect(leaseweb_dir)`, `rules.diagnose(signals, pam, scope)`,
+`actions.apply(run_id, leaseweb_dir, action, by=…, emit=…)` and `actions.break_service(leaseweb_dir, service)`.
+Until a file is merged, the command stops with "`boomerang/doctor/rules.py` isn't merged yet (owner B …)" and exit
+code 3. Don't touch `doctor/__init__.py`: add your own file next to it.
+
+**Behaviour worth knowing:**
+- Preconditions (both commands): the run is `passed` or has a scope, `runs/<id>/leaseweb/` exists, and the stack that
+  is up (`runs/.active_stack`) belongs to this run.
+- The AI never sees timestamps or the run id (log lines go through `llm.stable_text()`), so the cache replays.
+  Evidence goes between `<<<EVIDENCE … EVIDENCE>>>` markers; a marker inside a log line can't close them (S8).
+- Any LLM failure (unavailable, cache miss in replay, two invalid answers) gives `explanation=""` and a warning event.
+  The incident is still written.
+- `raise_severity` only counts when the rules said `degraded`.
+- `fix()` refuses an action that isn't in the diagnosis (same id **and** target), refuses after the incident is
+  resolved, and records a fix that raised (`ok=false`, the error in `detail`) before re-raising it.
+- After a fix, or a later `doctor <id>`, a healthy stack sets `resolved_at`.
+- Measured: the explanation for a `db_down` incident took 6.9 s on `qwen2.5-coder:14b` (Leaseweb server, docs/17),
+  three plain sentences, and raised degraded → down because checkout was broken.
+
 ---
 
 ## 6. What the UI reads (D builds against this now)
 
 - `runs/<id>/doctor.json` = `Incident` (above). D starts from `fixtures/doctor-demo.json`, a hand-written `db_down`
   incident with ShopLite evidence, and switches to the real file when piece 3 lands.
+- `resolved_at` set → show the incident as fixed (with `applied` as its history), not as an open alert.
 - Doctor events arrive in `events.jsonl` with `stage="doctor"`, so the activity feed shows them live.
 - Buttons call `ui.runner.start("doctor-fix", run_id, …)`, which maps to `boomerang doctor fix <id> <action> <target>
   --by ui`, and `"doctor"` for a fresh diagnosis. `move_back` asks for a second confirmation (risk high).

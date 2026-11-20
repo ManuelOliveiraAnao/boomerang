@@ -23,6 +23,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
+from typer.core import TyperGroup
 
 if TYPE_CHECKING:
     from boomerang.events import Emitter
@@ -496,3 +497,88 @@ def _print_cache(result, roots: list[Path]) -> None:
         console.print(f"[yellow]· {escape(line)}[/yellow]")
     if result.ok:
         console.print("✅ cache ok: replay will find every answer these runs need")
+
+
+# ---------- Boomerang Doctor (C, docs/18 §5.4) ----------
+
+class _DoctorGroup(TyperGroup):
+    """`boomerang doctor <run_id>` diagnoses; `doctor fix …` and `doctor break …` are subcommands."""
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        if args and not args[0].startswith("-") and args[0] not in self.commands:
+            args = ["diagnose", *args]
+        return super().parse_args(ctx, args)
+
+
+doctor_app = typer.Typer(cls=_DoctorGroup, no_args_is_help=True,
+                         help="Boomerang Doctor: diagnose the self-hosted stack, approve one fix at a time.")
+app.add_typer(doctor_app, name="doctor")
+RISK_STYLES = {"low": "green", "medium": "yellow", "high": "bold red"}
+
+
+@doctor_app.command("diagnose")
+def doctor_diagnose(run_id: RunId) -> None:
+    """Diagnose a run's stack: 0 = healthy, 1 = incident found (the fixes are listed), 3 = error."""
+    with _handled():
+        from boomerang import doctor
+        incident = doctor.run(run_id, emit=_run_emitter(run_id))
+    if incident is None:
+        console.print("✅ stack healthy")
+        raise typer.Exit(EXIT_PASSED)
+    _print_incident(incident)
+    raise typer.Exit(EXIT_FAILED)
+
+
+@doctor_app.command("fix")
+def doctor_fix(
+    run_id: RunId,
+    action_id: Annotated[str, typer.Argument(help="restart_service | start_service | reverify | move_back")],
+    target: Annotated[str, typer.Argument(help="Service name, or component id for move_back.")],
+    by: Annotated[str, typer.Option(help="Who approved: cli or ui.")] = "cli",
+) -> None:
+    """Run one fix the diagnosis offered, then check the stack again: 0 = healthy again, 1 = still failing."""
+    with _handled():
+        from boomerang import doctor
+        incident = doctor.fix(run_id, action_id, target, by=by, emit=_run_emitter(run_id))
+    last = incident.applied[-1]
+    console.print(f"{'✅' if last.ok else '❌'} {escape(last.action.label)}"
+                  + (f" · {escape(last.detail)}" if last.detail else ""))
+    if incident.resolved_at is not None:
+        console.print("✅ stack healthy again")
+        raise typer.Exit(EXIT_PASSED)
+    console.print(f"[yellow]⚠️ still failing: run `boomerang doctor {escape(run_id)}` for a fresh diagnosis[/yellow]")
+    raise typer.Exit(EXIT_FAILED)
+
+
+@doctor_app.command("break")
+def doctor_break(
+    run_id: RunId,
+    service: Annotated[str, typer.Argument(help="postgres | rabbitmq | seaweedfs | api | worker")],
+) -> None:
+    """Demo only: stop one service of the lab stack, so the Doctor has something to find."""
+    with _handled():
+        from boomerang import doctor
+        doctor.break_service(run_id, service)
+    console.print(f"💥 stopped {escape(service)}: now run `boomerang doctor {escape(run_id)}`")
+
+
+def _print_incident(incident) -> None:
+    d = incident.diagnosis
+    icon = "❌" if incident.severity == "down" else "⚠️"
+    where = " · ".join(x for x in (d.service, d.component_id) if x)
+    console.print(f"{icon} [bold]{escape(d.rule)}[/bold] ({incident.severity})"
+                  + (f" · {escape(where)}" if where else ""))
+    console.print(escape(d.root_cause))
+    if d.impact:
+        console.print(f"users: {escape(', '.join(d.impact))}")
+    if incident.explanation:
+        console.print(f"[italic]{escape(incident.explanation)}[/italic]")
+    if d.evidence:
+        table = Table("source", "service", "detail", title="evidence")
+        for s in d.evidence:
+            table.add_row(s.source, s.service, escape(s.detail or (s.lines[-1] if s.lines else "")))
+        console.print(table)
+    for n, a in enumerate(d.actions, 1):
+        style = RISK_STYLES.get(a.risk, "")
+        console.print(f"{n}. {escape(a.label)} [{style}](risk {a.risk})[/{style}] → "    # one line: copy-pasteable
+                      f"boomerang doctor fix {escape(incident.run_id)} {a.id} {escape(a.target)}", soft_wrap=True)

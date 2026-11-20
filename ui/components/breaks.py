@@ -166,7 +166,27 @@ def render(src: Source) -> None:
     # ---- approval gate ----
     st.divider()
     ss = st.session_state
-    if ss.get("approved"):
+    approval = src.json("approval")
+    live_run = ss.get("live_run")
+    is_live = src.kind == "run" and src.path is not None and src.path.name == live_run
+    if approval:
+        when = time.strftime("%H:%M:%S", time.localtime(approval.get("ts", 0)))
+        st.success(f"Plan approved by {approval.get('approved_by', '?')} at {when} "
+                   f"(plan hash {str(approval.get('plan_sha256', ''))[:12]}). "
+                   f"{len(migrated)} components move; {len(reds)} stay with a human.")
+    elif is_live:
+        from ui import runner
+        step = ss.get("step")
+        busy = bool(step and not step.done)
+        waiting = src.summary.get("status") == "awaiting_approval"
+        st.info(f"Nothing is written until you approve. {len(migrated)} components will move to "
+                f"Leaseweb; {len(reds)} are flagged for a human and AWS stays untouched.")
+        if st.button("Approve plan and migrate", type="primary", disabled=busy or not waiting):
+            ss.step = runner.start("approve", live_run, then=["execute"])
+            st.rerun()
+        if not waiting and not busy:
+            st.caption("The plan isn't waiting for approval (see the activity log above).")
+    elif ss.get("approved"):
         st.success(f"Plan approved at {ss.get('approved_at', '')}. "
                    f"{len(migrated)} components will move; {len(reds)} stay with a human.")
         if st.button("Revoke approval"):

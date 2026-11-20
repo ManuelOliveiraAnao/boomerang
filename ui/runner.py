@@ -54,7 +54,7 @@ def available() -> tuple[bool, str]:
 class Step:
     """One CLI call running in the background for a run."""
 
-    name: str                      # plan | approve | execute | roundtrip | move-over | move-back
+    name: str                      # plan | approve | execute | roundtrip
     run_id: str
     proc: subprocess.Popen
     log: Path
@@ -77,20 +77,21 @@ class Step:
         return "\n".join(lines[-n:])
 
 
-def _args(name: str, run_id: str, app_dir: str) -> list[str]:
+def _args(name: str, run_id: str, app_dir: str, components: list[str] | None = None) -> list[str]:
+    """`components`: partial migration (docs/16): `approve --only a,b`, `move-over <id> a`, `move-back <id> a`."""
+    only = ",".join(components or [])
     return {
         "plan": ["plan", app_dir, "--run-id", run_id],
-        "approve": ["approve", run_id, "--by", "ui"],
+        "approve": ["approve", run_id, "--by", "ui"] + (["--only", only] if only else []),
         "execute": ["execute", run_id],
         "roundtrip": ["roundtrip", run_id],
-        # docs/16 §3.1: partial migrations (need C's scope support)
-        "move-over": ["move-over", run_id],
-        "move-back": ["move-back", run_id],
+        "move-over": ["move-over", run_id, only, "--by", "ui"],
+        "move-back": ["move-back", run_id, only, "--by", "ui"],
     }[name]
 
 
 def start(name: str, run_id: str, app_dir: str = "sample-app/aws", then: list[str] | None = None,
-          extra: list[str] | None = None) -> Step:
+          components: list[str] | None = None) -> Step:
     """Start `boomerang <name>` for this run in the background; output goes to runs/<id>/ui-<name>.log."""
     cli = _cli()
     if cli is None:
@@ -101,7 +102,7 @@ def start(name: str, run_id: str, app_dir: str = "sample-app/aws", then: list[st
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "NO_COLOR": "1",
            "COLUMNS": "120"}
     with log.open("w", encoding="utf-8") as fh:
-        proc = subprocess.Popen(cli + _args(name, run_id, app_dir) + list(extra or []), cwd=ROOT, stdout=fh,
+        proc = subprocess.Popen(cli + _args(name, run_id, app_dir, components), cwd=ROOT, stdout=fh,
                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env)
     return Step(name=name, run_id=run_id, proc=proc, log=log, then=list(then or []))
 

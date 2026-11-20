@@ -1,0 +1,15 @@
+#cloud-config
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - rsync
+
+users:
+  - name: shoplite
+    groups: [docker]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+
+runcmd:
+  - [ sh, -c, "ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable" ]

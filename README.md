@@ -1,8 +1,10 @@
 # 🪃 Boomerang
 
-**Leave AWS for Leaseweb. Know what breaks. Come back if you want.**
+**Leave AWS for your own servers. Know what breaks. Come back if you want.**
 
-Boomerang scans an application built on AWS (code and Terraform), shows what will break, moves it to a ready-to-run Leaseweb setup with help from a **local AI model**, proves it works with the app's own tests, moves the data, takes it all back to AWS if needed, and prices both sides honestly.
+Boomerang scans an application built on AWS (code and Terraform), shows what will break, moves it to a ready-to-run self-hosted setup (your own servers, or a provider such as Leaseweb) with help from a **local AI model**, proves it works with the app's own tests, moves the data, takes it all back to AWS if needed, and prices both sides honestly.
+
+> **Where can it migrate to? Anywhere you can run Docker.** The output is a standard self-hosted stack (Docker Compose with Postgres, RabbitMQ and S3-compatible storage) plus a deploy script that works with any server reachable over SSH: a company's own servers, an on-premises data center, or a rented server. **Leaseweb is our example target** (European provider, used for the deploy guide and the price table). In code, the self-hosted platform is still called `leaseweb` (`Platform = "leaseweb"`, `runs/<id>/leaseweb/`); it's an internal name, not a restriction.
 
 | Step | What happens | AI? |
 |---|---|---|
@@ -10,7 +12,7 @@ Boomerang scans an application built on AWS (code and Terraform), shows what wil
 | **Traffic lights** | Each service/feature: 🟢 config only · 🟠 moves via adapter, changes listed · 🔴 not migrated, needs a human | Rules decide, AI explains |
 | **Approve** | A human approves the plan before anything is written | – |
 | **De-lock** | Each function that calls AWS is rewritten onto small, pre-tested adapters (`sovereign_sdk`); S3 is a config change | AI per function |
-| **Leaseweb files** | `docker-compose.yml`, `cloud-init.yaml`, `deploy.sh`, backups, scoped credentials, `DEPLOY.md` | Templates |
+| **Self-hosted files** (Leaseweb as example) | `docker-compose.yml`, `cloud-init.yaml`, `deploy.sh`, backups, scoped credentials, `DEPLOY.md` | Templates |
 | **Verify live** | Files valid → stack boots on the laptop → original tests pass → health check ✅ | – |
 | **Move data** | Items, objects, pending messages; counts and checksums compared | – |
 | **Round trip** | Back to AWS: original code + data copied back, tests again, **what got lost** | – |
@@ -38,7 +40,7 @@ Start with **[docs/00-start-here.md](docs/00-start-here.md)**.
 | [11 Decisions](docs/11-decisions.md) | Answers to the open questions; v1 → v2 changes |
 | [12 Costs](docs/12-costs.md) | Price table, usage, ops costs, egress rules |
 | [13 Security](docs/13-security.md) | Redaction, allowlists, scoped keys, approvals |
-| [14 Leaseweb target](docs/14-leaseweb-target.md) | Generated files and how they're verified |
+| [14 Self-hosted target (Leaseweb example)](docs/14-leaseweb-target.md) | Generated files and how they're verified |
 
 ## Quickstart (once the code exists)
 

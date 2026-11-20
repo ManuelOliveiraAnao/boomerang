@@ -12,7 +12,7 @@ Companies want to move workloads off AWS to European providers like Leaseweb (co
 
 ## 2. Solution: Boomerang
 
-An AI-assisted migration tool from AWS to Leaseweb and back, that **shows what breaks, does the move, proves it, and prices it honestly**.
+An AI-assisted migration tool from AWS to **self-hosted infrastructure** (a company's own servers, or a provider such as Leaseweb) and back, that **shows what breaks, does the move, proves it, and prices it honestly**.
 
 | Step | What the user sees |
 |---|---|
@@ -24,6 +24,8 @@ An AI-assisted migration tool from AWS to Leaseweb and back, that **shows what b
 | **Move data** | Items, objects and pending messages copied; counts and checksums compared |
 | **Round trip** | Back to AWS: original code + data copied back (including data written on Leaseweb), tests again, **report of what got lost** |
 | **Costs** | Real published prices, editable usage, self-hosting ops cost included, egress €0 for switching from 12 Jan 2027 (EU Data Act) |
+
+> **Where can it migrate to? Anywhere you can run Docker.** The output is a standard self-hosted stack (Docker Compose with Postgres, RabbitMQ and S3-compatible storage) plus a deploy script that works with any server reachable over SSH: a company's own servers, an on-premises data center, or a rented server. **Leaseweb is our example target** (European provider, used for the deploy guide and the price table). In code, the self-hosted platform is still called `leaseweb` (`Platform = "leaseweb"`, `runs/<id>/leaseweb/`); it's an internal name, not a restriction.
 
 **Principles**
 - AI only where it reads unseen code or explains; everything else is plain, deterministic code.

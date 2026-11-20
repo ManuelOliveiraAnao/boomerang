@@ -1,0 +1,158 @@
+name: boomerang-leaseweb
+
+services:
+{% if postgres_enabled %}
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: shoplite
+      POSTGRES_USER: shoplite
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    {% if postgres_enabled or rabbitmq_enabled or seaweed_enabled %}
+    volumes:
+    {% endif %}
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shoplite -d shoplite"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+{% endif %}
+
+{% if rabbitmq_enabled %}
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: shoplite
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+{% endif %}
+
+{% if seaweed_enabled %}
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: server -s3 -s3.config=/etc/seaweedfs/s3.json
+    ports:
+      - "127.0.0.1:8333:8333"
+    volumes:
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+      - seaweedfs_data:/data
+{% endif %}
+
+  api:
+{% if aws_environment %}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+{% endif %}
+    build:
+      context: ./app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+{% if postgres_enabled %}
+      DATABASE_URL: postgresql://shoplite:${POSTGRES_PASSWORD}@postgres:5432/shoplite
+{% endif %}
+{% if rabbitmq_enabled %}
+      AMQP_URL: amqp://shoplite:${RABBITMQ_PASSWORD}@rabbitmq:5672/shoplite
+{% endif %}
+{% if seaweed_enabled %}
+      S3_ENDPOINT_URL: http://seaweedfs:8333
+      S3_ACCESS_KEY_ID: ${SEAWEEDFS_ACCESS_KEY}
+      S3_SECRET_ACCESS_KEY: ${SEAWEEDFS_SECRET_KEY}
+{% endif %}
+{% for key, value in aws_environment.items() %}
+      {{ key }}: {{ value }}
+{% endfor %}
+{% if postgres_enabled or rabbitmq_enabled %}
+    depends_on:
+{% if postgres_enabled %}
+      postgres:
+        condition: service_healthy
+{% endif %}
+{% if rabbitmq_enabled %}
+      rabbitmq:
+        condition: service_healthy
+{% endif %}
+{% endif %}
+
+  worker:
+{% if aws_environment %}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+{% endif %}
+    build:
+      context: ./app
+    command: python -m app.worker
+    environment:
+{% if postgres_enabled %}
+      DATABASE_URL: postgresql://shoplite:${POSTGRES_PASSWORD}@postgres:5432/shoplite
+{% endif %}
+{% if rabbitmq_enabled %}
+      AMQP_URL: amqp://shoplite:${RABBITMQ_PASSWORD}@rabbitmq:5672/shoplite
+{% endif %}
+{% if seaweed_enabled %}
+      S3_ENDPOINT_URL: http://seaweedfs:8333
+      S3_ACCESS_KEY_ID: ${SEAWEEDFS_ACCESS_KEY}
+      S3_SECRET_ACCESS_KEY: ${SEAWEEDFS_SECRET_KEY}
+{% endif %}
+{% for key, value in aws_environment.items() %}
+      {{ key }}: {{ value }}
+{% endfor %}
+{% if postgres_enabled or rabbitmq_enabled %}
+    depends_on:
+{% if postgres_enabled %}
+      postgres:
+        condition: service_healthy
+{% endif %}
+{% if rabbitmq_enabled %}
+      rabbitmq:
+        condition: service_healthy
+{% endif %}
+{% endif %}
+
+{% if postgres_enabled %}
+  backup:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: postgres
+      PGDATABASE: shoplite
+      PGUSER: shoplite
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./backup:/backup:ro
+      - postgres_backup:/backups
+    command: sh -c "while true; do /backup/pg_backup.sh; sleep 86400; done"
+    depends_on:
+      postgres:
+        condition: service_healthy
+{% endif %}
+
+{% if postgres_enabled or rabbitmq_enabled or seaweed_enabled %}
+volumes:
+{% if postgres_enabled %}
+  postgres_data:
+{% endif %}
+{% if rabbitmq_enabled %}
+  rabbitmq_data:
+{% endif %}
+{% if seaweed_enabled %}
+  seaweedfs_data:
+{% endif %}
+{% if postgres_enabled %}
+  postgres_backup:
+{% endif %}
+{% endif %}

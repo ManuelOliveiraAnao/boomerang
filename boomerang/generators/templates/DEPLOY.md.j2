@@ -1,0 +1,9 @@
+# Leaseweb deployment
+
+1. Create an Ubuntu 24.04 Leaseweb instance.
+2. Copy this directory with `deploy.sh user@host`.
+3. Put Caddy or Traefik behind ports 80/443 for TLS.
+4. Keep Postgres, RabbitMQ, SeaweedFS and management ports private.
+5. Review AWS Lambda, IAM and CloudWatch findings before cut-over.
+
+The generated credentials are in `secrets.env`; keep them out of Git and LLM prompts.

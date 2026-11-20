@@ -256,8 +256,10 @@ def _history(src: Source) -> None:
         else:
             res, cls = "running", ""
         moves = s.get("data_moves") or []
-        counts = " · ".join(f'{c.get("component", "")} {c.get("source_count", "?")}/{c.get("target_count", "?")}'
-                            for m in moves for c in (m.get("counts") or []))
+        counts = " · ".join(
+            f'{"→" if m.get("direction", "").startswith("aws") else "←"} '
+            f'{c.get("component_id") or c.get("component", "")} {c.get("source_count", "?")}/{c.get("target_count", "?")}'
+            for m in moves for c in (m.get("counts") or []))
         comps = html.escape(", ".join(s.get("components", [])))
         out.append(f'<div class="sc-h"><span class="t">{when}</span>'
                    f'<span class="act {"over" if over else "back"}">{"Move over →" if over else "← Move back"}</span>'
@@ -322,6 +324,11 @@ def render(src: Source, rows: list[dict], assessment: dict) -> None:
 
     step = st.session_state.get("step")
     busy = bool(step and not step.done)
+    # Live moves need a passed run whose self-hosted stack is up, and nothing else running.
+    blocked = mode == "readonly" or busy or (mode == "live" and src.summary.get("status") != "passed")
+    if mode == "live" and blocked and not busy:
+        st.markdown('<div class="sc-preview"><b>WAITING</b> Moves open once the run has passed and its stack '
+                    'is up.</div>', unsafe_allow_html=True)
     h1, _, h2 = st.columns([5, 2, 5])
     n_aws = len(ids) - len(here) + len(reds)
     h1.markdown(f'<div class="sc-lane"><b><i style="background:{AWS_ORANGE}"></i>AWS</b><span>{n_aws} services · eu-central-1</span></div>',
@@ -337,11 +344,14 @@ def render(src: Source, rows: list[dict], assessment: dict) -> None:
                    unsafe_allow_html=True)
         action = "move_back" if on_sh else "move_over"
         label = "← Move back" if on_sh else "Move over →"
-        if m.button(label, key=f"sc_mv_{r['id']}", width="stretch", disabled=mode == "readonly" or busy):
+        # Moving the last self-hosted service back is the round trip, not a step.
+        last = on_sh and len(here) == 1
+        if m.button(label, key=f"sc_mv_{r['id']}", width="stretch", disabled=blocked or last,
+                    help="Bringing the last one back is the round trip (Data & round trip)." if last else None):
             if mode == "preview":
                 sc.preview_move(src, ids, [r["id"]], action)
             else:
-                st.session_state.step = runner.start(action.replace("_", "-"), src.path.name, extra=[r["id"]])
+                st.session_state.step = runner.start(action.replace("_", "-"), src.path.name, components=[r["id"]])
             st.rerun()
     for r in reds:
         a, _, b = st.columns([5, 2, 5], vertical_alignment="center")

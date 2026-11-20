@@ -1,0 +1,6 @@
+[
+  {"component_id": "receipt_thumbnailer", "feature": "event_notification", "status": "lost", "detail": "S3-to-Lambda notification is not migrated."},
+  {"component_id": "shoplite_task", "feature": "role", "status": "lost", "detail": "IAM role is replaced only by generated scoped credentials."},
+  {"component_id": "orders", "feature": "gsi", "status": "changed", "detail": "DynamoDB GSI is implemented as a Postgres index."},
+  {"component_id": "order_events", "feature": "visibility_timeout", "status": "changed", "detail": "SQS visibility timeout is emulated by RabbitMQ redelivery."}
+]

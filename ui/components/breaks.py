@@ -212,8 +212,9 @@ def _gate(src: Source, rows: list[dict], reds: list[dict], assessment: dict) -> 
         chosen = scope_ui.choose(src, rows, reds, assessment, editable=False, initial=sc.approved_scope(src, ids))
         when = time.strftime("%H:%M:%S", time.localtime(approval.get("ts", 0)))
         st.success(f"Plan approved by {approval.get('approved_by', '?')} at {when} "
-                   f"(plan hash {str(approval.get('plan_sha256', ''))[:12]}): {len(chosen)} of {len(ids)} "
-                   f"services move; {len(reds)} stay with a human.")
+                   f"(plan hash {str(approval.get('plan_sha256', ''))[:12]}). Self-hosted: "
+                   f"{', '.join(chosen) or 'nothing'}; stays on AWS: "
+                   f"{', '.join(i for i in ids if i not in chosen) or 'nothing'}; {len(reds)} stay with a human.")
     elif is_live:
         step = ss.get("step")
         busy = bool(step and not step.done)
@@ -224,8 +225,7 @@ def _gate(src: Source, rows: list[dict], reds: list[dict], assessment: dict) -> 
         st.caption("Nothing is written until you approve. AWS stays untouched until every check passes.")
         if st.button(_approve_label(chosen, ids), type="primary",
                      disabled=busy or not waiting or not chosen or not allowed):
-            extra = ["--only", ",".join(chosen)] if partial else None
-            ss.step = runner.start("approve", live_run, then=["execute"], extra=extra)
+            ss.step = runner.start("approve", live_run, then=["execute"], components=chosen if partial else None)
             st.rerun()
         if partial and not allowed:
             st.caption("Moving only some services needs the engine's scope support (C: boomerang/scope.py). "

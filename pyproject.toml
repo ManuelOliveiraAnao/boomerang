@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "boomerang"
+version = "0.1.0"
+description = "Leave AWS for Leaseweb. Know what breaks. Come back if you want."
+readme = "README.md"
+requires-python = ">=3.12"
+# The list from docs/07, with the lower bounds the plan needs (docs/15 §2.1).
+dependencies = [
+    "ollama>=0.4",            # typed responses (resp.message.content); the server must be >= 0.5 for format=<schema>
+    "anthropic>=1,<2",        # fallback provider only; imported lazily inside boomerang/llm.py
+    "pydantic>=2",
+    "typer",
+    "rich",
+    "python-dotenv",
+    "jinja2",
+    "pyyaml",
+    "boto3>=1.36",            # request_checksum_calculation / response_checksum_validation (sovereign_sdk.storage)
+    "psycopg[binary]>=3",
+    "pika",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "pytest",
+    "streamlit",
+    "moto[server]",           # A: fake AWS for the lab (process backend) and the tests
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+boomerang = "boomerang.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["boomerang", "sovereign_sdk"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# tests/fixtures and tests/data hold small apps with their own tests: run them via the verifier, not here
+norecursedirs = ["fixtures", "data", ".venv", "runs"]
+markers = [
+    "integration: needs Docker and the lab",
+    "llm: needs a running model",
+    "slow: takes minutes",
+]
+# A bare `pytest` never needs Docker or a model; `pytest -m integration` overrides this.
+addopts = '-m "not integration and not llm" --strict-markers'
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+"boomerang/models.py" = ["I001"]   # copied verbatim from docs/02 §3; keep it diffable against the doc
+"tests/test_*.py" = ["F811"]       # pytest fixtures imported from another test module are "redefined" as args

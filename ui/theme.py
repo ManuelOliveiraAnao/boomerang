@@ -218,9 +218,67 @@ _LANDING_CSS = f"""
   .lp-stat span {{ color: {MUTED}; font-size: 0.82rem; }}
 
 
-  .lp-light {{ border-top: 2px solid var(--c); }}
-  .lp-light .dot {{ width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); display: inline-block; }}
-  .lp-light ul {{ margin: 10px 0 0; padding-left: 18px; color: {MUTED}; font-size: 0.86rem; }}
+  /* Traffic lights: a rules board, one column per light, details pop up on hover / focus. */
+  .lt-board {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; }}
+  .lt-col {{ position: relative; background: {BG_1}; border: 1px solid {BORDER}; border-radius: 14px; padding: 20px 8px 10px;
+    transition: opacity .25s ease, border-color .25s ease; }}
+  .lt-col::before {{ content: ""; position: absolute; left: 20px; right: 20px; top: -1px; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--c), transparent); opacity: .7; }}
+  .lt-board:hover .lt-col:not(:hover) {{ opacity: .45; }}
+  .lt-col:hover {{ border-color: {BORDER_STRONG}; z-index: 5; }}
+  .lt-head {{ display: flex; align-items: center; gap: 14px; padding: 0 12px; }}
+  .lt-signal {{ display: inline-flex; flex-direction: column; gap: 4px; padding: 6px 5px; border-radius: 8px;
+    background: {BG}; border: 1px solid {BORDER}; }}
+  .lt-signal i {{ width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.08); }}
+  .lt-signal i.lit {{ background: var(--c); box-shadow: 0 0 10px var(--c); }}
+  .lt-label {{ color: {TEXT}; font-weight: 560; font-size: 1.02rem; letter-spacing: -0.01em; }}
+  .lt-count {{ color: {FAINT}; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.72rem; margin-top: 2px; }}
+  .lt-blurb {{ color: {MUTED}; font-size: 0.88rem; line-height: 1.55; margin: 14px 12px 14px; min-height: 2.9em; }}
+  .lt-rows {{ border-top: 1px solid {BORDER}; padding-top: 6px; }}
+  .lt-row {{ position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px;
+    cursor: default; outline: none; transition: background .2s ease; }}
+  .lt-row:hover, .lt-row:focus {{ background: rgba(255,255,255,0.035); }}
+  .lt-row:focus-visible {{ box-shadow: inset 0 0 0 1px {BORDER_STRONG}; }}
+  .lt-svc {{ flex: 0 0 auto; min-width: 66px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.7rem;
+    color: {MUTED}; }}
+  .lt-feat {{ flex: 1; color: {TEXT_2}; font-size: 0.88rem; line-height: 1.4; }}
+  .lt-chev {{ color: {FAINT}; font-size: 1rem; transition: transform .2s ease, color .2s ease; }}
+  .lt-row:hover .lt-chev, .lt-row:focus .lt-chev {{ color: var(--c); transform: translateX(2px); }}
+
+  .lt-pop {{ position: absolute; left: 4px; width: min(400px, 88vw); bottom: calc(100% + 8px); z-index: 20; text-align: left;
+    background: #131416; border: 1px solid {BORDER_STRONG}; border-radius: 12px; padding: 14px 16px 6px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4);
+    opacity: 0; visibility: hidden; transform: translate3d(0, 6px, 0) scale(.98); transform-origin: 30% 100%;
+    transition: opacity .18s ease, transform .22s cubic-bezier(.215,.61,.355,1), visibility 0s linear .22s;
+    pointer-events: none; }}
+  .lt-pop::after {{ content: ""; position: absolute; left: 28px; bottom: -6px; width: 10px; height: 10px;
+    background: #131416; border-right: 1px solid {BORDER_STRONG}; border-bottom: 1px solid {BORDER_STRONG}; transform: rotate(45deg); }}
+  .lt-col:last-child .lt-pop {{ left: auto; right: 4px; transform-origin: 70% 100%; }}
+  .lt-col:last-child .lt-pop::after {{ left: auto; right: 28px; }}
+  .lt-row:hover .lt-pop, .lt-row:focus .lt-pop {{ opacity: 1; visibility: visible; transform: none;
+    transition: opacity .18s ease, transform .22s cubic-bezier(.215,.61,.355,1), visibility 0s; }}
+  .lt-pop-h {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }}
+  .lt-pop-l {{ display: inline-flex; align-items: center; gap: 8px; color: var(--c); font-size: 0.74rem; font-weight: 500; }}
+  .lt-pop-l::before {{ content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }}
+  .lt-pop-s {{ font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.7rem; color: {FAINT}; }}
+  .lt-pop-t {{ color: {TEXT}; font-weight: 560; font-size: 0.98rem; margin-bottom: 8px; }}
+  .lt-kv {{ display: grid; grid-template-columns: 104px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid {BORDER}; }}
+  .lt-kv span {{ color: {FAINT}; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+    font-family: "JetBrains Mono", ui-monospace, monospace; padding-top: 2px; }}
+  .lt-kv p {{ margin: 0; color: {TEXT_2}; font-size: 0.84rem; line-height: 1.5; }}
+  .lt-kv code {{ font-size: 0.76rem; color: {TEXT}; background: {BG}; border: 1px solid {BORDER}; border-radius: 5px; padding: 1px 6px; }}
+  .lt-note {{ margin-top: 16px; color: {FAINT}; font-size: 0.82rem; }}
+  .lt-note span {{ color: {TEXT_2}; }}
+  @media (max-width: 900px) {{
+    .lt-board {{ grid-template-columns: 1fr; }}
+    .lt-board:hover .lt-col:not(:hover) {{ opacity: 1; }}
+    .lt-blurb {{ min-height: 0; }}
+    /* No room to float: the details open inline under the tapped rule. */
+    .lt-row {{ flex-wrap: wrap; }}
+    .lt-pop {{ position: static; flex-basis: 100%; width: auto; display: none; box-shadow: none; margin-top: 8px; transform: none; }}
+    .lt-pop::after {{ display: none; }}
+    .lt-row:focus .lt-pop {{ display: block; }}
+  }}
 
   .lp-trip {{ display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }}
   .lp-stop {{ flex: 1 1 200px; background: {BG_2}; border: 1px solid {BORDER_STRONG}; border-radius: 12px; padding: 16px;

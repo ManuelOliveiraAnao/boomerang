@@ -27,7 +27,7 @@ _GROUPS = [
     (".lp-chips", 25),
 ]
 # Single blocks that enter on their own.
-_SINGLES = [".lp-kicker", ".lp-lead", ".lp-cta", ".lp-hero .lp-mark", ".lp-hero .bm-eyebrow", ".lp-hero .bm-sub"]
+_SINGLES = [".lp-kicker", ".lp-lead", ".lp-cta", ".lt-board", ".lp-hero .lp-mark", ".lp-hero .bm-eyebrow", ".lp-hero .bm-sub"]
 # Headings split into words.
 _SPLITS = [".lp-hero .bm-title", ".lp-h2"]
 

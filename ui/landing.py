@@ -84,6 +84,70 @@ def _section(kicker: str, title: str, lead: str) -> None:
     """)
 
 
+# Traffic-light rules, from docs/02 §4 (B's boomerang/assess.py). Each row:
+# (service, feature, why it gets this light, what happens on Leaseweb, what handles it)
+_LIGHTS = [
+    ("green", "Config only", "Same API on the other side. Only the endpoint and keys change.", [
+        ("S3", "Basic object operations", "put, get, list, delete and head work the same on any S3-compatible store.",
+         "S3-compatible object storage: SeaweedFS, or Leaseweb Object Storage", "Storage adapter, config only"),
+    ]),
+    ("amber", "Moves via adapter", "Moves through a small, tested adapter. Every behaviour difference is listed.", [
+        ("DynamoDB", "Items, queries on key or GSI", "Postgres through the kv adapter, which mimics boto3's Table calls.",
+         "Postgres. GSIs become indexes; numbers come back as Decimal, like boto3", "sovereign_sdk.kv"),
+        ("DynamoDB", "Conditional writes", "Only attribute_not_exists and attribute_exists are supported.",
+         "Same check in Postgres; a failure raises ConditionalCheckFailedException", "sovereign_sdk.kv"),
+        ("SQS", "Standard queues, retries, DLQ", "Send, receive, delete, visibility timeout and maxReceiveCount.",
+         "RabbitMQ quorum queue with a dead-letter exchange", "sovereign_sdk.queue"),
+        ("S3", "Presigned URLs, versioning, lifecycle", "Supported differently, or needs configuring on the target.",
+         "Listed in the plan with what to set up", "Review in the plan"),
+    ]),
+    ("red", "Needs a human", "No safe automatic equivalent. Flagged, explained and left for a person.", [
+        ("IAM", "Roles, instance profiles, policies", "Permissions can't be translated one to one.",
+         "Replaced by generated credentials scoped to one database, vhost and bucket", "Human review"),
+        ("Lambda", "Functions and triggers", "Serverless functions have no drop-in equivalent here.",
+         "Flagged, not migrated", "Human"),
+        ("S3", "Event notifications", "Events that call Lambda or SQS aren't wired up on the target.",
+         "Flagged, not migrated", "Human"),
+        ("DynamoDB", "Transactions, streams, TTL, PartiQL", "Outside what the kv adapter supports.",
+         "The adapter raises UnsupportedFeature instead of guessing", "Human"),
+        ("SQS", "FIFO, attribute filters, delays", "Outside what the queue adapter supports.",
+         "Flagged, not migrated", "Human"),
+    ]),
+]
+
+
+def _lights_board() -> str:
+    order = ["green", "amber", "red"]
+    cols = []
+    for key, label, blurb, rows in _LIGHTS:
+        signal = "".join(f'<i class="{"lit" if k == key else ""}"></i>' for k in order)
+        items = "".join(
+            f'<div class="lt-row" tabindex="0">'
+            f'<span class="lt-svc">{svc}</span><span class="lt-feat">{feat}</span>'
+            f'<span class="lt-chev" aria-hidden="true">›</span>'
+            f'<div class="lt-pop" role="tooltip">'
+            f'<div class="lt-pop-h"><span class="lt-pop-l">{label}</span><span class="lt-pop-s">{svc}</span></div>'
+            f'<div class="lt-pop-t">{feat}</div>'
+            f'<div class="lt-kv"><span>Why</span><p>{why}</p></div>'
+            f'<div class="lt-kv"><span>On Leaseweb</span><p>{target}</p></div>'
+            f'<div class="lt-kv"><span>Handled by</span><p><code>{by}</code></p></div>'
+            f'</div></div>'
+            for svc, feat, why, target, by in rows
+        )
+        cols.append(
+            f'<div class="lt-col" style="--c:{LIGHT_COLORS[key]}">'
+            f'<div class="lt-head"><span class="lt-signal">{signal}</span>'
+            f'<div><div class="lt-label">{label}</div>'
+            f'<div class="lt-count">{len(rows)} rule{"s" if len(rows) != 1 else ""}</div></div></div>'
+            f'<p class="lt-blurb">{blurb}</p><div class="lt-rows">{items}</div></div>'
+        )
+    return (
+        '<div class="lt-board">' + "".join(cols) + "</div>"
+        '<div class="lt-note"><span>Rules decide the light.</span> The AI only writes the explanation, '
+        "and it may raise a light, never lower it. Hover or tap a rule for details.</div>"
+    )
+
+
 def render() -> None:
     motion.inject()
 
@@ -199,20 +263,7 @@ def render() -> None:
         "Every AWS service and feature the app uses gets one of three lights. Reds are flagged "
         "for a human; Boomerang never pretends to migrate them.",
     )
-    g, a, r = LIGHT_COLORS["green"], LIGHT_COLORS["amber"], LIGHT_COLORS["red"]
-    _html(f"""
-      <div class="lp-grid">
-        <div class="lp-card lp-light" style="--c:{g}"><span class="dot"></span><h3>Config only</h3>
-          <p>Same API on the other side; only endpoints and keys change.</p>
-          <ul><li>S3 → S3-compatible object storage</li></ul></div>
-        <div class="lp-card lp-light" style="--c:{a}"><span class="dot"></span><h3>Moves via adapter</h3>
-          <p>Moves through a tested adapter. Every behaviour difference is listed.</p>
-          <ul><li>DynamoDB → Postgres</li><li>SQS → RabbitMQ (retries, dead-letter queue)</li></ul></div>
-        <div class="lp-card lp-light" style="--c:{r}"><span class="dot"></span><h3>Needs a human</h3>
-          <p>No safe automatic equivalent. Flagged, explained and left for a person.</p>
-          <ul><li>Lambda triggers</li><li>IAM roles and policies</li><li>CloudWatch alarms</li></ul></div>
-      </div>
-    """)
+    _html(_lights_board())
 
     # ---------------- round trip ----------------
     _section(

@@ -35,6 +35,8 @@ app = typer.Typer(no_args_is_help=True, add_completion=False,
                   help="🪃 Boomerang: leave AWS for Leaseweb, know what breaks, come back if you want.")
 lab_app = typer.Typer(no_args_is_help=True, help="Fake AWS (moto) on 127.0.0.1:4566.")
 app.add_typer(lab_app, name="lab")
+cache_app = typer.Typer(no_args_is_help=True, help="The LLM cache that replays the demo offline (C7).")
+app.add_typer(cache_app, name="cache")
 
 console = Console()
 
@@ -66,9 +68,13 @@ def _handled() -> Iterator[None]:
         if isinstance(e, LLMError):                 # LLMUnavailable / CacheMiss say what to do
             console.print(f"[red]❌ {type(e).__name__}: {escape(str(e))}[/red]")
             raise typer.Exit(EXIT_ERROR) from None
-        if type(e).__name__ == "NotApproved":
+        names = {cls.__name__ for cls in type(e).__mro__}   # by name: a broken pipeline module must not break this
+        if "NotApproved" in names:
             console.print(f"[red]❌ not approved: {escape(str(e))}[/red]")
             raise typer.Exit(EXIT_AWAITING) from None
+        if "PipelineError" in names:                         # user-facing stops say what to do
+            console.print(f"[red]❌ {escape(str(e))}[/red]")
+            raise typer.Exit(EXIT_ERROR) from None
         raise
 
 
@@ -373,3 +379,69 @@ def runs() -> None:
         started = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(s.started_at))
         table.add_row(s.run_id, s.status, started, escape(s.source_dir), s.roundtrip)
     console.print(table)
+
+
+# ---------- demo LLM cache (C, C7) ----------
+
+CacheDir = Annotated[Path | None, typer.Option("--cache-dir", file_okay=False,
+                                               help="Default: BOOMERANG_CACHE_DIR (demo/llm-cache for the demo).")]
+
+
+@cache_app.command("check")
+def cache_check(
+    run: Annotated[list[str] | None, typer.Option("--run", help="Run(s) that must be covered: repeat the flag.")] = None,
+    cache_dir: CacheDir = None,
+    prune: Annotated[bool, typer.Option("--prune", help="Delete entries none of the runs used.")] = False,
+) -> None:
+    """Before committing the cache: entries valid, no secrets, every call covered, nothing stale, no drift."""
+    with _handled():
+        from boomerang import democache
+        from boomerang.config import get_settings
+
+        folder = cache_dir or get_settings().cache_dir
+        roots = [_run_root(r) for r in run or []]
+        result = democache.check(folder, roots)
+        if prune and result.unused:
+            for path in democache.prune(result):
+                console.print(f"🗑️ pruned {escape(path.name)}")
+    _print_cache(result, roots)
+    raise typer.Exit(EXIT_PASSED if result.ok else EXIT_FAILED)
+
+
+@cache_app.command("freeze")
+def cache_freeze(
+    run: Annotated[str, typer.Option("--run", help="The run that recorded the cache.")] = "golden",
+    cache_dir: CacheDir = None,
+) -> None:
+    """Right after recording: check, then write manifest.json (prompts, schemas, provider, model, entries)."""
+    with _handled():
+        from boomerang import democache
+        from boomerang.config import get_settings
+
+        folder = cache_dir or get_settings().cache_dir
+        result = democache.check(folder, [_run_root(run)])
+        _print_cache(result, [_run_root(run)])
+        if not result.ok:
+            console.print("[red]❌ not frozen: fix the problems above (re-record into an empty folder)[/red]")
+            raise typer.Exit(EXIT_FAILED)
+        path = democache.write_manifest(folder, run)
+    console.print(f"🧊 frozen: {escape(str(path))}. Any edit to prompts/*.md or a schema now needs a re-recording.")
+
+
+def _print_cache(result, roots: list[Path]) -> None:
+    by_label: Counter[str] = Counter(e.label.split(":", 1)[0] for e in result.entries)
+    kinds = ", ".join(f"{n} {label}" for label, n in sorted(by_label.items())) or "none"
+    console.print(f"cache {escape(str(result.cache_dir))}: {len(result.entries)} entr(y/ies) ({escape(kinds)})"
+                  + (f" · runs: {', '.join(r.name for r in roots)}" if roots else ""))
+    for line in result.problems:
+        console.print(f"[red]❌ {escape(line)}[/red]")
+    for line in result.drift:
+        console.print(f"[red]❌ drift: {escape(line)}[/red]")
+    for label in result.missing:
+        console.print(f"[red]❌ missing: {escape(label)} (recorded in live mode? re-record)[/red]")
+    for e in result.unused:
+        console.print(f"[yellow]⚠️ unused: {escape(e.path.name)} ({escape(e.label)}); --prune deletes it[/yellow]")
+    for line in result.notes:
+        console.print(f"[yellow]· {escape(line)}[/yellow]")
+    if result.ok:
+        console.print("✅ cache ok: replay will find every answer these runs need")

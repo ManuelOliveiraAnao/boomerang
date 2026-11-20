@@ -37,12 +37,6 @@ STUBS = [
     ("boomerang.datamover", "move", (None, "aws->leaseweb", {}, {}, None), {}, "A"),
     ("sovereign_sdk.queue", "client", (), {}, "A"),
     ("boomerang.cost", "estimate", ({}, {}, {}), {}, "D"),
-    ("boomerang.fixer", "frames", ("",), {}, "C"),
-    ("boomerang.report", "write", (None,), {}, "C"),
-    ("boomerang.pipeline", "plan", (P,), {}, "C"),
-    ("boomerang.pipeline", "approve", ("r1",), {}, "C"),
-    ("boomerang.pipeline", "execute", ("r1",), {}, "C"),
-    ("boomerang.pipeline", "roundtrip", ("r1",), {}, "C"),
 ]
 
 

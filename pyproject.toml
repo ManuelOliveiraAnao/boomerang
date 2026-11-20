@@ -52,3 +52,4 @@ target-version = "py312"
 
 [tool.ruff.lint.per-file-ignores]
 "boomerang/models.py" = ["I001"]   # copied verbatim from docs/02 §3; keep it diffable against the doc
+"tests/test_*.py" = ["F811"]       # pytest fixtures imported from another test module are "redefined" as args

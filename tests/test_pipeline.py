@@ -471,7 +471,24 @@ def test_generated_files_stay_inside_leaseweb(world, source, bad):
 
 # ---------- fixture fallback (L9) ----------
 
-def test_not_built_stops_the_run_without_fixture_mode(source):
+# What the fixture-mode tests treat as "not built yet": every role has finished its modules by now.
+UNBUILT = {
+    "boomerang.scanner.scan": "B", "boomerang.scanner.static.scan_static": "B", "boomerang.assess.assess": "B",
+    "boomerang.lockin.score": "B", "boomerang.generators.leaseweb.make_secrets": "B",
+    "boomerang.generators.leaseweb.render": "B", "boomerang.lost.build": "B",
+    "boomerang.lab.status": "A", "boomerang.verifier.verify": "A", "boomerang.verifier.reset_data": "A",
+}
+
+
+def unbuild(monkeypatch: pytest.MonkeyPatch, targets: dict[str, str] = UNBUILT) -> None:
+    for target, owner in targets.items():
+        def raiser(*args: Any, _what: str = target, _owner: str = owner, **kwargs: Any) -> Any:
+            raise NotBuilt(_what, owner=_owner)
+        monkeypatch.setattr(target, raiser)
+
+
+def test_not_built_stops_the_run_without_fixture_mode(source, monkeypatch):
+    unbuild(monkeypatch)
     with pytest.raises(NotBuilt, match="owner B"):
         pipeline.plan(source, run_id="r1")
     assert pipeline.load_run("r1").status == "error"
@@ -486,6 +503,7 @@ def fixtures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (folder / "verification.json").write_text(verification().model_dump_json(), encoding="utf-8")
     (folder / "data.aws-to-leaseweb.json").write_text(data_move().model_dump_json(), encoding="utf-8")
     monkeypatch.setattr(pipeline, "fixtures_dir", lambda: folder)
+    unbuild(monkeypatch)
     monkeypatch.setenv("BOOMERANG_ALLOW_FIXTURES", "1")
     get_settings.cache_clear()
     return folder
@@ -621,3 +639,16 @@ def test_cli_pipeline_errors_exit_3(world, source):
 def test_unchanged_original_tests_hash_matches_the_source(world, source):
     pipeline.migrate(source, yes=True, run_id="r1")
     assert hash_tree(root_of("r1") / "leaseweb" / "app" / "tests") == hash_tree(source.parent / "tests")
+
+
+def test_plan_accepts_the_folder_the_ui_made_for_its_log(world, source):
+    """ui/runner.py (D7) opens runs/<id>/ui-plan.log, then starts `boomerang plan --run-id <id>`."""
+    root = root_of("ui1")
+    root.mkdir(parents=True)
+    (root / "ui-plan.log").write_text("starting\n", encoding="utf-8")
+    (root / "leftover.txt").write_text("x", encoding="utf-8")
+    ctx = pipeline.plan(source, run_id="ui1")
+    assert ctx.summary.status == "awaiting_approval"
+    assert (root / "ui-plan.log").read_text(encoding="utf-8") == "starting\n" and not (root / "leftover.txt").exists()
+    with pytest.raises(RunExists):
+        pipeline.plan(source, run_id="ui1")                     # a real run (run.json) still needs --force

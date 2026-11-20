@@ -4,6 +4,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from boomerang._stub import NotBuilt
 from boomerang.cli import app, light_counts, lights_table
 from boomerang.config import get_settings
 from boomerang.events import Emitter
@@ -36,10 +37,13 @@ def test_help_lists_every_command():
     assert all(c in lab.output for c in ("up", "down", "status"))
 
 
-def test_unbuilt_command_exits_3_and_names_the_owner(tmp_path):
+def test_unbuilt_command_exits_3_and_names_the_owner(tmp_path, monkeypatch):
+    def scan(app_dir, emit):
+        raise NotBuilt("scanner.scan", owner="B")
+    monkeypatch.setattr("boomerang.scanner.scan", scan)          # every role is built now: simulate one that isn't
     result = runner.invoke(app, ["scan", str(tmp_path)])
     assert result.exit_code == 3 and "not built yet" in result.output and "owner B" in result.output
-    result = runner.invoke(app, ["migrate", str(tmp_path), "--yes"])        # plan runs; B's scan isn't built
+    result = runner.invoke(app, ["migrate", str(tmp_path), "--yes"])        # plan runs; the scan isn't built
     assert result.exit_code == 3 and "owner B" in result.output
 
 

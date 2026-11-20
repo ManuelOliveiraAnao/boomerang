@@ -221,7 +221,7 @@ def test_events_use_the_delock_stage_and_end_with_a_summary(run, good_llm):
     assert {e.stage for e in run.events} == {"delock"}
     assert run.events[-1].message.startswith("de-lock done: 2 rewritten by AI")
     assert any("receipt_thumbnailer" in e.message and "not migrated" in e.message for e in run.events)
-    assert any("scan_static is not built yet" in e.message for e in run.events)   # B's stub: warning only
+    assert any(e.message.startswith(("residual check", "residual lock-in")) for e in run.events)
 
 
 def test_delock_binding_returns_function_rewrites(run, good_llm):

@@ -79,6 +79,7 @@ SEED_ORDERS = 25
 COMPOSE_PROJECT = "bmr-verify"          # docs/03 §3.8: must match the -p that verifier.verify (A) boots with
 ACTIVE_STACK = ".active_stack"          # runs/.active_stack: run id whose Leaseweb stack is (being) booted
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+UI_LOG = re.compile(r"^ui-[\w-]+\.log$")         # the UI's subprocess logs in runs/<id>/ (ui/runner.py, D7)
 
 # Fixture fallback (L9): first existing file wins. Proposed names; B1 owns fixtures/.
 FIXTURES: dict[str, tuple[str, ...]] = {
@@ -229,7 +230,7 @@ def plan(source_dir: Path, *, run_id: str | None = None, force: bool = False,
     run_id = run_id or new_run_id()
     root = run_dir(run_id)
     notes: list[str] = []
-    if root.exists():
+    if (root / "run.json").exists():
         if not force:
             raise RunExists(f"run {run_id!r} already exists: use --force to replace it")
         try:
@@ -237,7 +238,15 @@ def plan(source_dir: Path, *, run_id: str | None = None, force: bool = False,
         except PipelineError as e:
             notes.append(f"could not stop the old stack of {run_id}: {e}")
         _rmtree(root)
-    root.mkdir(parents=True)
+    elif root.exists():
+        # No run.json: the UI made the folder for its `ui-<step>.log` (open, it is our stdout) before
+        # starting `boomerang plan --run-id <id>` (L2). Keep those logs; clear anything else.
+        for child in root.iterdir():
+            if child.is_dir():
+                _rmtree(child)
+            elif not UI_LOG.match(child.name):
+                child.unlink(missing_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
 
     summary = RunSummary(run_id=run_id, source_dir=str(source), status="running", started_at=time.time(),
                          out_dir=str(root), llm=settings.llm_badge)

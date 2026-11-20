@@ -27,13 +27,8 @@ _BOOMERANG_JS = """
   const s = { mx: null, my: null, x: 0, y: 0, angle: 0, speed: 0, hover: false, t0: performance.now(), last: performance.now() };
   const SPIN = 360;          // degrees per second at full spin (one turn per second)
   const PULL = 0.07, MAX = 40;
-  document.addEventListener("mousemove", (e) => {
-    s.mx = e.clientX; s.my = e.clientY;
-    const mark = document.querySelector(".lp-mark.bm-follow");
-    if (!mark) return;
-    const r = mark.getBoundingClientRect();
-    s.hover = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-  }, { passive: true });
+  const NEAR = 140, FAR = 320;  // px from the logo's centre: full spin inside NEAR, fading out to FAR
+  document.addEventListener("mousemove", (e) => { s.mx = e.clientX; s.my = e.clientY; }, { passive: true });
   document.addEventListener("mouseleave", () => { s.mx = null; s.hover = false; });
   function frame(now) {
     const dt = Math.min(0.05, (now - s.last) / 1000); s.last = now;
@@ -42,14 +37,17 @@ _BOOMERANG_JS = """
     if (boom) {
       const r = mark.getBoundingClientRect();
       const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-      let tx = 0, ty = 0;
+      let tx = 0, ty = 0, near = 0;
       if (s.mx !== null) {
         tx = Math.max(-MAX, Math.min(MAX, (s.mx - cx) * PULL));
         ty = Math.max(-MAX, Math.min(MAX, (s.my - cy) * PULL));
+        const d = Math.hypot(s.mx - cx, s.my - cy);
+        near = Math.max(0, Math.min(1, (FAR - d) / (FAR - NEAR)));
       }
+      s.hover = near > 0;
       s.x += (tx - s.x) * Math.min(1, dt * 4);
       s.y += (ty - s.y) * Math.min(1, dt * 4);
-      const target = s.hover ? SPIN : 0;
+      const target = SPIN * near;
       s.speed += (target - s.speed) * Math.min(1, dt * 2.5);
       s.angle += s.speed * dt;
       if (!s.hover && s.speed < 8) {             // settle back upright

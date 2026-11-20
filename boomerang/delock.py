@@ -701,6 +701,43 @@ def _summary(records: list[RewriteRecord], changed_files: int, emit: Emitter | N
           rewritten=ai, unchanged=ai_same, one_to_one=code, rejected=kept, files=changed_files)
 
 
+# ---------- shared with the fixer (C5) ----------
+
+FileContext = _FileCtx
+
+
+def file_context(app_dir: Path, rel: str, emit: Emitter | None = None) -> _FileCtx | None:
+    """The rules-check context of an already de-locked file: only the adapters it imports are in play."""
+    try:
+        tree = slicer.module_info(Path(app_dir), rel).tree
+    except (OSError, SyntaxError, UnicodeDecodeError) as e:
+        _emit(emit, f"{rel}: can't parse ({type(e).__name__})", "warning", file=rel)
+        return None
+    in_play = {m: m for m in sorted(ADAPTER_OF_KIND.values()) if _existing_alias(tree, m)}
+    return _file_ctx(Path(app_dir), rel, in_play, emit)
+
+
+def delimit(text: str, extra_markers: tuple[str, ...] = ()) -> str:
+    """``_data`` for other prompts: neutralises this module's markers and ``extra_markers`` inside data."""
+    text = _data(text)
+    for name in extra_markers:
+        text = text.replace(f"<<<{name}", f"<<< {name}").replace(f"{name}>>>", f"{name} >>>")
+    return text
+
+
+def write_diff(before: str, after: str, rel: str, name: str, diffs_dir: Path, out_dir: Path) -> tuple[str, int]:
+    """``diffs/<file>__<name>.diff``; returns (path relative to ``out_dir``, changed lines)."""
+    return _write_diff(before, after, rel, name, diffs_dir, out_dir)
+
+
+def prompt_environment() -> jinja2.Environment:
+    return _environment(get_settings().prompts_dir)
+
+
+def adapter_interface() -> str:
+    return _adapter_interface()
+
+
 # ---------- small helpers ----------
 
 def _emit(emit: Emitter | None, message: str, level: str = "info", **data: Any) -> None:

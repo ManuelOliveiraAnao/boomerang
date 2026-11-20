@@ -70,6 +70,18 @@ _CSS = f"""
 
   html.bm-motion .lp-hero {{ will-change: transform, opacity; transform-origin: 50% 0; }}
   [data-testid="stBaseButton-primary"] {{ will-change: transform; }}
+
+  /* Enter / Shift+Enter checkpoint navigation: a small hint, bottom right, landing page only */
+  .bm-keys {{ position: fixed; right: 20px; bottom: 18px; z-index: 999; display: flex; align-items: center; gap: 10px;
+    padding: 7px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.10); background: rgba(15,16,17,0.86);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: #8A8F98;
+    font: 500 0.72rem/1 "JetBrains Mono", ui-monospace, monospace; transition: opacity .4s ease, transform .4s ease; }}
+  .bm-keys kbd {{ display: inline-block; padding: 3px 6px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.16);
+    border-bottom-width: 2px; background: #141516; color: #D0D6E0; font: inherit; }}
+  .bm-keys b {{ color: #F7F8F8; font-weight: 500; min-width: 3.2em; text-align: right; }}
+  .bm-keys.quiet {{ opacity: .45; }}
+  .bm-keys.quiet:hover {{ opacity: 1; }}
+  @media (hover: none) {{ .bm-keys {{ display: none; }} }}
 </style>
 """
 
@@ -276,6 +288,105 @@ _JS = """
 """
 
 
+_KEYS_JS = """
+<script>
+(() => {
+  // Enter = next checkpoint, Shift+Enter = previous. Checkpoints: the top of the page, every section heading,
+  // each step of the "How it works" timeline (aligned to the reading line, so the boomerang lights it) and the CTA.
+  if (window.__bmKeys) return;
+  window.__bmKeys = true;
+  const CHECKPOINTS = ".lp-section, .tl-step, .lp-cta";
+  const NAV = 84;                                   // keep headings clear of the top navigation
+  const smooth = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+
+  function scroller(from) {
+    for (let el = from; el && el !== document.body; el = el.parentElement) {
+      const oy = getComputedStyle(el).overflowY;
+      if ((oy === "auto" || oy === "scroll") && el.scrollHeight > el.clientHeight) return el;
+    }
+    return document.scrollingElement;
+  }
+  function stops() {
+    const els = [...document.querySelectorAll(CHECKPOINTS)].filter((el) => el.offsetParent !== null);
+    if (!els.length) return null;
+    const sc = scroller(els[0]);
+    const top = sc === document.scrollingElement ? 0 : sc.getBoundingClientRect().top;
+    const vh = sc === document.scrollingElement ? innerHeight : sc.clientHeight;
+    const list = els.map((el) => {
+      // Resting position: steps not yet revealed are drawn 28px lower (their slide-in), so remove the transform.
+      let ty = 0;
+      try { ty = new DOMMatrixReadOnly(getComputedStyle(el).transform).m42 || 0; } catch (_) { ty = 0; }
+      const r = { top: el.getBoundingClientRect().top - ty };
+      // a timeline step: put its node just above the reading line (52% of the view) so it lights up
+      const want = el.classList.contains("tl-step") ? r.top + 12.5 - (top + vh * 0.52 - 10) : r.top - top - NAV;
+      return { el, y: Math.max(0, Math.round(sc.scrollTop + want)) };
+    }).sort((a, b) => a.y - b.y);
+    // Start at the top; merge stops closer than a third of the view (they'd show the same screen).
+    const uniq = [{ el: null, y: 0 }];
+    for (const p of list) if (p.y - uniq[uniq.length - 1].y > vh / 3) uniq.push(p);
+    return { sc, list: uniq };
+  }
+  function typing(t) {
+    if (!t || t === document.body) return false;
+    if (t.isContentEditable) return true;
+    return !!t.closest("input, textarea, select, button, a, summary, [role=tab], [role=button], [role=option], [role=listbox], [role=combobox], [role=dialog]");
+  }
+  function go(dir) {
+    const s = stops();
+    if (!s) return false;
+    const cur = s.sc.scrollTop;
+    const next = dir > 0 ? s.list.find((p) => p.y > cur + 6)
+                         : [...s.list].reverse().find((p) => p.y < cur - 6);
+    if (!next) return false;
+    s.sc.scrollTo({ top: next.y, behavior: smooth() });
+    // A smooth scroll can be dropped (focus changes, a rerender): make sure we arrive.
+    setTimeout(() => { if (Math.abs(s.sc.scrollTop - next.y) > 40) s.sc.scrollTo({ top: next.y }); }, 900);
+    hint(s.list.indexOf(next), s.list.length - 1);
+    return true;
+  }
+
+  // ---- hint, bottom right, landing page only ----
+  let box = null, quietTimer = 0;
+  function hint(n, total) {
+    if (!box) return;
+    box.querySelector("b").textContent = n ? `${n} / ${total}` : "";
+    box.classList.remove("quiet");
+    clearTimeout(quietTimer);
+    quietTimer = setTimeout(() => box && box.classList.add("quiet"), 2200);
+  }
+  function syncHint() {
+    const onLanding = !!document.querySelector(".lp-hero");
+    if (onLanding && !box) {
+      box = document.createElement("div");
+      box.className = "bm-keys quiet";
+      box.setAttribute("aria-hidden", "true");
+      // Built with DOM calls: markup inside a script string makes Streamlit's sanitiser drop the whole script.
+      const el = (tag, text) => { const n = document.createElement(tag); if (text) n.textContent = text; return n; };
+      const part = (keys, word) => {
+        const span = el("span");
+        keys.forEach((k, i) => { if (i) span.append("+"); span.append(el("kbd", k)); });
+        span.append(" " + word);
+        return span;
+      };
+      box.append(part(["Enter"], "next"), part(["Shift", "Enter"], "back"), el("b"));
+      document.body.appendChild(box);
+    } else if (!onLanding && box) {
+      box.remove(); box = null;
+    }
+  }
+  setInterval(syncHint, 500);
+  syncHint();
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.isComposing || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    if (typing(e.target) || !document.querySelector(".lp-hero")) return;
+    if (go(e.shiftKey ? -1 : 1)) e.preventDefault();
+  }, true);
+})();
+</script>
+"""
+
+
 def inject() -> None:
     """Add the motion layer to the current page (safe to call on every rerun)."""
     import json
@@ -285,3 +396,4 @@ def inject() -> None:
              .replace("%SPLITS%", json.dumps(_SPLITS)))
     st.markdown(_CSS, unsafe_allow_html=True)
     st.html(js, unsafe_allow_javascript=True)
+    st.html(_KEYS_JS, unsafe_allow_javascript=True)

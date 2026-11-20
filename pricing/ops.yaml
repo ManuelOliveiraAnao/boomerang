@@ -1,0 +1,13 @@
+# The cost of running it yourself (editable in the UI). Assumptions; use your team's real numbers.
+hourly_rate_eur: 60
+hours_per_month:              # Leaseweb (self-hosted Postgres, RabbitMQ, object storage)
+  patching_and_upgrades: 2
+  backups_and_restore_tests: 1
+  monitoring_and_on_call: 3
+aws_ops_hours: 1              # managed services still need some care; keeps the comparison fair
+backup_storage_gb: 25         # priced with lw.object_storage.gb_month
+monitoring_tool_month_eur: 0  # e.g. self-hosted Prometheus; fill in if you pay for one
+
+# One-off migration egress rule (EU Data Act, Regulation (EU) 2023/2854):
+# switching charges, including data egress fees, are banned from this date.
+eu_data_act_switching_free_from: 2027-01-12

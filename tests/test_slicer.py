@@ -109,10 +109,10 @@ def test_module_names_and_context(tmp_path):
     out = slicer.functions_with_usages(tmp_path, _pam(_ref("app/db.py", _line(MODULE, "table.get_item"))))
     [(sl, _)] = out["app/db.py"]
     assert sl.module_names == ["helper", "table"]
-    # transitive: table needs dynamodb, os and boto3; helper shows only its header; UNUSED is left out
+    # transitive: table needs dynamodb, os and boto3; a small helper comes whole; UNUSED is left out
     assert sl.context.split("\n") == [
         "import os", "import boto3", 'dynamodb = boto3.resource("dynamodb")',
-        'table = dynamodb.Table(os.environ["ORDERS_TABLE"])', "def helper(x):", "    ...",
+        'table = dynamodb.Table(os.environ["ORDERS_TABLE"])', "def helper(x):", "    return x",
     ]
 
 

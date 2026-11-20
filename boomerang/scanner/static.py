@@ -86,7 +86,103 @@ def _module_aws_receiver_services(tree: ast.Module) -> dict[str, str]:
                 for target in targets:
                     if isinstance(target, ast.Name):
                         services[target.id] = services[root.id]
+    # Helpers that return a receiver (ShopLite: `def _table(): return dynamodb.Table(...)`): calls through
+    # `_table().put_item(...)` are usages of that service too. Two passes: a helper may call a helper.
+    for _ in range(2):
+        for fn in tree.body:
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or fn.name in services:
+                continue
+            for ret in ast.walk(fn):
+                root = _root_name(ret.value) if isinstance(ret, ast.Return) and ret.value is not None else None
+                if root is not None and root.id in services:
+                    services[fn.name] = services[root.id]
+                    break
     return services
+
+
+ENV_HINT = {"dynamodb": "TABLE", "s3": "BUCKET", "sqs": "QUEUE"}
+
+
+def _env_names(tree: ast.Module) -> list[str]:
+    """Names read with os.environ[...], os.environ.get(...) or os.getenv(...), in source order."""
+    names: list[str] = []
+    for node in ast.walk(tree):
+        arg: ast.expr | None = None
+        if isinstance(node, ast.Subscript) and _dotted(node.value) == "os.environ":
+            arg = node.slice
+        elif isinstance(node, ast.Call) and _dotted(node.func) in ("os.environ.get", "os.getenv") and node.args:
+            arg = node.args[0]
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value not in names:
+            names.append(arg.value)
+    return names
+
+
+def _dotted(node: ast.expr) -> str | None:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+def _entrypoints(tree: ast.Module, relative: str) -> list[str]:
+    """`app = FastAPI(...)` at module level in app/main.py -> "app.main:app"."""
+    module = relative[:-3].replace("/", ".")
+    out: list[str] = []
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+                and (_dotted(node.value.func) or "").split(".")[-1] in ("FastAPI", "Flask", "Starlette")):
+            out += [f"{module}:{t.id}" for t in node.targets if isinstance(t, ast.Name)]
+    return out
+
+
+# ---------- Terraform blocks ----------
+
+def _matching(text: str, start: int) -> int:
+    """Index just after the `}` closing the block whose `{` ends right before `start`."""
+    depth, i = 1, start
+    while i < len(text) and depth:
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        i += 1
+    return i
+
+
+def _tf_blocks(source: str) -> list[tuple[str, str, str]]:
+    """(resource type, name, body) for every `resource "aws_x" "name" { ... }` (brace-matched)."""
+    out: list[tuple[str, str, str]] = []
+    for m in re.finditer(r'resource\s+"(aws_[^"]+)"\s+"([^"]+)"\s*\{', source):
+        end = _matching(source, m.end())
+        out.append((m.group(1), m.group(2), source[m.end():end - 1]))
+    return out
+
+
+def _tf_nested(body: str, block: str) -> list[str]:
+    out: list[str] = []
+    for m in re.finditer(rf"\b{block}\s*\{{", body):
+        end = _matching(body, m.end())
+        out.append(body[m.end():end - 1])
+    return out
+
+
+def _tf_top(body: str) -> str:
+    """The body without nested blocks (so a GSI's `name` isn't read as the table's)."""
+    out, depth = [], 0
+    for ch in body:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        elif depth == 0:
+            out.append(ch)
+    return "".join(out)
+
+
+def _tf_attr(body: str, name: str) -> str | None:
+    m = re.search(rf'(?m)^\s*{name}\s*=\s*"?([^"\n]+?)"?\s*$', body)
+    return m.group(1).strip() if m else None
 
 
 def _root_name(node: ast.expr) -> ast.Name | None:
@@ -112,6 +208,7 @@ def scan_static(app_dir: Path, exclude: tuple[str, ...] = ("tests", "sovereign_s
     app_dir = Path(app_dir)
     components: dict[str, dict] = {}
     files: list[dict] = []
+    entrypoints: list[str] = []
     env_vars: list[dict] = []
 
     for path in sorted(app_dir.rglob("*")):
@@ -127,6 +224,8 @@ def scan_static(app_dir: Path, exclude: tuple[str, ...] = ("tests", "sovereign_s
             source = path.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=relative)
             receiver_services = _module_aws_receiver_services(tree)
+            env_names = _env_names(tree)
+            entrypoints.extend(e for e in _entrypoints(tree, relative) if e not in entrypoints)
             component_ids: list[str] = []
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
@@ -180,6 +279,10 @@ def scan_static(app_dir: Path, exclude: tuple[str, ...] = ("tests", "sovereign_s
                 )
                 if usage not in component["usages"]:
                     component["usages"].append(usage)
+                if not component.get("name_env_var"):
+                    hint = next((n for n in env_names if ENV_HINT[service] in n.upper()), None)
+                    if hint:
+                        component["name_env_var"] = hint
             files.append(
                 {
                     "path": relative,
@@ -190,6 +293,7 @@ def scan_static(app_dir: Path, exclude: tuple[str, ...] = ("tests", "sovereign_s
 
         elif path.name in {"main.tf", "variables.tf", "outputs.tf"} or path.suffix == ".tf":
             source = path.read_text(encoding="utf-8")
+            dlq_targets = set(re.findall(r"deadLetterTargetArn\s*=\s*aws_sqs_queue\.(\w+)\.arn", source))
             relative_blocks = re.finditer(
                 r'resource\s+"(?P<resource>aws_[^"]+)"\s+"(?P<name>[^"]+)"\s*\{',
                 source,
@@ -208,9 +312,12 @@ def scan_static(app_dir: Path, exclude: tuple[str, ...] = ("tests", "sovereign_s
                     kind, provider = "kv_table", "aws.dynamodb"
                     features = ["put", "get", "update", "delete", "query", "gsi"]
                 elif resource == "aws_sqs_queue":
+                    if name in dlq_targets:
+                        continue                      # a DLQ is a feature of its main queue, not a component
                     kind, provider = "queue", "aws.sqs"
                     features = ["send", "receive", "delete"]
-                    if "redrive_policy" in source[match.start():]:
+                    block = next((b for r, n, b in _tf_blocks(source) if r == resource and n == name), "")
+                    if "redrive_policy" in block:
                         features.extend(["visibility_timeout", "dlq"])
                 elif resource == "aws_lambda_function":
                     kind, provider = "function", "aws.lambda"
@@ -236,6 +343,7 @@ def scan_static(app_dir: Path, exclude: tuple[str, ...] = ("tests", "sovereign_s
                     for feature in features:
                         if feature not in component["features"]:
                             component["features"].append(feature)
+                    _apply_terraform(component, resource, name, source)
 
         elif path.name == "Dockerfile":
             source = path.read_text(encoding="utf-8")
@@ -269,9 +377,50 @@ def scan_static(app_dir: Path, exclude: tuple[str, ...] = ("tests", "sovereign_s
         "pam_version": "0.2",
         "app_name": app_dir.name,
         "platform": "aws",
-        "entrypoints": [],
+        "entrypoints": entrypoints,
         "test_command": "pytest -q tests",
         "components": list(components.values()),
         "files": files,
         "env": env_vars,
     })
+
+
+def _apply_terraform(component: dict, resource: str, name: str, source: str) -> None:
+    """Real resource name, keys, GSIs and queue settings from the Terraform block (the PAM contract)."""
+    body = next((b for r, n, b in _tf_blocks(source) if r == resource and n == name), None)
+    if body is None:
+        return
+    top = _tf_top(body)
+    real = _tf_attr(top, "bucket") or _tf_attr(top, "name") or _tf_attr(top, "function_name")
+    if real and "${" not in real and not real.startswith(("aws_", "var.")):
+        component["resource_name"] = real
+    if resource == "aws_dynamodb_table":
+        types = {}
+        for attr in _tf_nested(body, "attribute"):
+            n, t = _tf_attr(attr, "name"), _tf_attr(attr, "type")
+            if n:
+                types[n] = t if t in ("S", "N") else "S"
+        hash_key, range_key = _tf_attr(top, "hash_key"), _tf_attr(top, "range_key")
+        if hash_key:
+            component["partition_key"] = {"name": hash_key, "type": types.get(hash_key, "S")}
+        if range_key:
+            component["sort_key"] = {"name": range_key, "type": types.get(range_key, "S")}
+        indexes = []
+        for gsi in _tf_nested(body, "global_secondary_index"):
+            n, hk, rk = _tf_attr(gsi, "name"), _tf_attr(gsi, "hash_key"), _tf_attr(gsi, "range_key")
+            if n and hk:
+                ix = {"name": n, "partition_key": {"name": hk, "type": types.get(hk, "S")}}
+                if rk:
+                    ix["sort_key"] = {"name": rk, "type": types.get(rk, "S")}
+                indexes.append(ix)
+        if indexes:
+            component["indexes"] = indexes
+    elif resource == "aws_sqs_queue":
+        vt = _tf_attr(top, "visibility_timeout_seconds")
+        if vt and vt.isdigit():
+            component["visibility_timeout_s"] = int(vt)
+        mrc = re.search(r"maxReceiveCount\s*=\s*(\d+)", body)
+        if mrc:
+            component["max_receive_count"] = int(mrc.group(1))
+        if (_tf_attr(top, "fifo_queue") or "").lower() == "true":
+            component["fifo"] = True

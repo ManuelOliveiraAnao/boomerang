@@ -242,6 +242,8 @@ def expr_type(node: ast.AST, env: Mapping[str, str], adapters: Mapping[str, str]
         return env.get(node.id)
     if not isinstance(node, ast.Call):
         return None
+    if isinstance(node.func, ast.Name) and f"{node.func.id}()" in env:      # a helper: `_table()`
+        return env[f"{node.func.id}()"]
     svc = boto3_service(node)
     if svc is not None:
         mod, _, typ = SWAPS.get(svc, (None, None, None))
@@ -256,9 +258,19 @@ def expr_type(node: ast.AST, env: Mapping[str, str], adapters: Mapping[str, str]
 
 
 def module_adapter_types(tree: ast.Module, adapters: Mapping[str, str]) -> dict[str, str]:
-    """Module-level names bound to adapter objects (``dynamodb`` → kv.KV, ``table`` → kv.Table, …)."""
+    """Module-level names bound to adapter objects (``dynamodb`` → kv.KV, ``table`` → kv.Table, …), and
+    helpers that return one (ShopLite: ``def _table(): return dynamodb.Table(...)`` → ``"_table()"``)."""
     env: dict[str, str] = {}
     for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            returns = [n.value for n in ast.walk(stmt) if isinstance(n, ast.Return) and n.value is not None]
+            types = {expr_type(r, env, adapters) for r in returns}
+            if len(types) == 1 and None not in types:
+                env[f"{stmt.name}()"] = types.pop()  # type: ignore[assignment]
+            else:
+                env.pop(f"{stmt.name}()", None)
+            env.pop(stmt.name, None)
+            continue
         if isinstance(stmt, ast.Assign):
             targets = [t.id for t in stmt.targets if isinstance(t, ast.Name)]
             value: ast.AST | None = stmt.value

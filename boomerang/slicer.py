@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 
 CONTEXT_MAX_LINES = 30
+HELPER_MAX_LINES = 6                 # helpers this short come whole into the AI context (they return clients)
 BOM = "﻿"
 
 # One line with its ending, split exactly where the tokenizer counts lines (\r\n, \n, \r). Not
@@ -317,8 +318,14 @@ def make_slice(info: ModuleInfo, node: FunctionNode, qualname: str) -> FunctionS
 def module_context(info: ModuleInfo, names: list[str], max_lines: int = CONTEXT_MAX_LINES) -> str:
     """Top-level statements that define ``names``, plus what those assignments depend on, in file order.
 
-    Functions and classes contribute only their header line (the AI must not edit them).
+    Functions and classes contribute only their header line (the AI must not edit them), except small
+    helpers (fewer than ``HELPER_MAX_LINES`` lines, e.g. ``def _table(): return dynamodb.Table(...)``): the AI
+    has to see what they return, so they come whole, with the module-level names they read.
     """
+    def small_helper(stmt: ast.stmt) -> bool:
+        return (isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and (stmt.end_lineno or stmt.lineno) - stmt.lineno < HELPER_MAX_LINES)
+
     seen: dict[int, ast.stmt] = {}
     todo = list(names)
     while todo:
@@ -327,11 +334,16 @@ def module_context(info: ModuleInfo, names: list[str], max_lines: int = CONTEXT_
             if id(stmt) in seen:
                 continue
             seen[id(stmt)] = stmt
-            if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if small_helper(stmt):
+                todo.extend((names_read(stmt) - local_names(stmt)) & set(info.bound))  # type: ignore[arg-type]
+            elif not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 todo.extend(names_read(stmt) & set(info.bound))
 
     out: list[str] = []
     for stmt in sorted(seen.values(), key=lambda s: s.lineno):
+        if small_helper(stmt):
+            out.extend(ln.rstrip("\r\n") for ln in info.lines[stmt.lineno - 1:stmt.end_lineno or stmt.lineno])
+            continue
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             header_end = max(stmt.lineno, stmt.body[0].lineno - 1) if stmt.body else stmt.lineno
             chunk = [ln.rstrip("\r\n") for ln in info.lines[stmt.lineno - 1:header_end]] + ["    ..."]

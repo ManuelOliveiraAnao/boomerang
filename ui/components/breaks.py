@@ -175,9 +175,13 @@ def render(src: Source) -> None:
     is_live = src.kind == "run" and src.path is not None and src.path.name == live_run
     if approval:
         when = time.strftime("%H:%M:%S", time.localtime(approval.get("ts", 0)))
+        scope = approval.get("scope")
+        movable = [r["id"] for r in migrated if r["kind"] in MOVABLE]
+        moving = (f"Self-hosted: {', '.join(scope)}; stays on AWS: "
+                  f"{', '.join(c for c in movable if c not in scope) or 'nothing'}." if scope
+                  else f"{len(migrated)} components move; {len(reds)} stay with a human.")
         st.success(f"Plan approved by {approval.get('approved_by', '?')} at {when} "
-                   f"(plan hash {str(approval.get('plan_sha256', ''))[:12]}). "
-                   f"{len(migrated)} components move; {len(reds)} stay with a human.")
+                   f"(plan hash {str(approval.get('plan_sha256', ''))[:12]}). {moving}")
     elif is_live:
         from ui import runner
         step = ss.get("step")
@@ -185,8 +189,11 @@ def render(src: Source) -> None:
         waiting = src.summary.get("status") == "awaiting_approval"
         st.info(f"Nothing is written until you approve. {len(migrated)} components will move to "
                 f"Leaseweb; {len(reds)} are flagged for a human and AWS stays untouched.")
-        if st.button("Approve plan and migrate", type="primary", disabled=busy or not waiting):
-            ss.step = runner.start("approve", live_run, then=["execute"])
+        chosen, movable = _choose_scope(migrated, live_run, disabled=busy or not waiting)
+        hybrid = 0 < len(chosen) < len(movable)
+        label = f"Approve: move {len(chosen)} of {len(movable)}" if hybrid else "Approve plan and migrate"
+        if st.button(label, type="primary", disabled=busy or not waiting or not chosen):
+            ss.step = runner.start("approve", live_run, then=["execute"], components=chosen if hybrid else None)
             st.rerun()
         if not waiting and not busy:
             st.caption("The plan isn't waiting for approval (see the activity log above).")
@@ -214,3 +221,26 @@ def render(src: Source) -> None:
             ss.approved = True
             ss.approved_at = time.strftime("%H:%M:%S")
             st.rerun()
+
+
+MOVABLE = {"object_store", "kv_table", "queue"}      # docs/16: only these can be in a scope; 🔴 never
+
+
+def _choose_scope(migrated: list[dict], run_id: str, disabled: bool) -> tuple[list[str], list[str]]:
+    """Partial migration (docs/16): a checkbox per movable component, all checked by default."""
+    movable = [r for r in migrated if r["kind"] in MOVABLE]
+    if not movable:
+        return [], []
+    st.markdown("**Choose what moves.** Unchecked components stay on AWS (partial migration); "
+                "you can move them over or back later in *Data & round trip*.")
+    cols = st.columns(len(movable))
+    chosen = [r["id"] for r, col in zip(movable, cols)
+              if col.checkbox(r["id"], value=True, key=f"scope-{run_id}-{r['id']}", disabled=disabled)]
+    kept = [r["id"] for r in movable if r["id"] not in chosen]
+    if not chosen:
+        st.error("Choose at least one component to move.")
+    elif kept:
+        st.warning(f"🔴 Hybrid: the self-hosted app needs scoped AWS credentials for {', '.join(kept)} "
+                   "(they stay on AWS). Each component is consistent on its own; there are no transactions "
+                   "across the two sides.")
+    return chosen, [r["id"] for r in movable]

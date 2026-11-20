@@ -70,11 +70,12 @@ _CSS = f"""
     transition: background .15s, border-color .15s;
   }}
   .stButton > button:hover {{ border-color: rgba(255,255,255,0.28); color: {TEXT}; background: rgba(255,255,255,0.04); }}
-  .stButton > button[kind="primary"] {{
-    background: #E5E5E6; color: {BG}; border-color: #E5E5E6;
+  .stButton > button[kind="primary"], button[data-testid="stBaseButton-primary"] {{
+    background: #E5E5E6 !important; color: {BG} !important; border-color: #E5E5E6 !important;
     box-shadow: 0 1px 2px rgba(0,0,0,.4);
   }}
-  .stButton > button[kind="primary"]:hover {{ background: #fff; color: {BG}; }}
+  .stButton > button[kind="primary"] *, button[data-testid="stBaseButton-primary"] * {{ color: {BG} !important; }}
+  .stButton > button[kind="primary"]:hover, button[data-testid="stBaseButton-primary"]:hover {{ background: #fff !important; }}
   .stButton > button:disabled {{ opacity: .35; }}
 
   /* Tabs: small, muted, white when selected */
@@ -150,7 +151,89 @@ _CSS = f"""
 """
 
 
+BRAND_HTML = (
+    '<div style="display:flex;align-items:center;gap:10px;margin:4px 0 18px">'
+    '<div style="width:26px;height:26px;border-radius:7px;display:grid;place-items:center;'
+    'background:linear-gradient(135deg,#7170FF,#4E4BD8);font-size:14px">🪃</div>'
+    '<div><div style="font-weight:600;color:#F7F8F8;letter-spacing:-0.01em">Boomerang</div>'
+    '<div style="font-size:0.75rem;color:#8A8F98">AWS ⇄ Leaseweb</div></div></div>'
+)
+
+_LANDING_CSS = f"""
+<style>
+  .bm-apptitle {{ font-size: 1.6rem; font-weight: 560; letter-spacing: -0.025em; color: {TEXT}; margin: 12px 0 0; }}
+
+  .lp-hero {{ text-align: center; padding: 56px 0 8px; position: relative; }}
+  .lp-hero::before {{
+    content: ""; position: absolute; inset: -40px -10% auto; height: 420px; z-index: -1;
+    background: radial-gradient(ellipse at 50% 0%, {ACCENT}33, transparent 60%);
+  }}
+  .lp-hero .bm-title {{ font-size: clamp(2.4rem, 5.5vw, 4.2rem); margin: 18px auto 14px; }}
+  .lp-hero .bm-sub {{ margin: 0 auto; font-size: 1.12rem; max-width: 680px; line-height: 1.55; }}
+
+  .lp-section {{ padding: 64px 0 8px; }}
+  .lp-kicker {{ color: #A5A4FF; font-size: 0.8rem; font-weight: 500; letter-spacing: 0.02em; margin-bottom: 8px; }}
+  .lp-h2 {{ font-size: clamp(1.7rem, 3vw, 2.4rem); font-weight: 560; letter-spacing: -0.03em; color: {TEXT}; line-height: 1.12; margin: 0 0 10px; }}
+  .lp-lead {{ color: {MUTED}; font-size: 1.02rem; max-width: 720px; line-height: 1.6; margin-bottom: 26px; }}
+
+  .lp-grid {{ display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }}
+  .lp-card {{
+    background: {BG_1}; border: 1px solid {BORDER}; border-radius: 14px; padding: 20px;
+    transition: border-color .2s, transform .2s;
+  }}
+  .lp-card:hover {{ border-color: {BORDER_STRONG}; transform: translateY(-1px); }}
+  .lp-card h3 {{ font-size: 1rem !important; margin: 10px 0 6px !important; color: {TEXT} !important; }}
+  .lp-card p {{ color: {MUTED}; font-size: 0.9rem; line-height: 1.55; margin: 0; }}
+  .lp-icon {{
+    width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
+    background: {BG_2}; border: 1px solid {BORDER_STRONG}; font-size: 15px;
+  }}
+
+  .lp-stats {{ display: grid; gap: 1px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    background: {BORDER}; border: 1px solid {BORDER}; border-radius: 14px; overflow: hidden; margin-top: 40px; }}
+  .lp-stat {{ background: {BG}; padding: 18px 20px; }}
+  .lp-stat b {{ display: block; color: {TEXT}; font-size: 1.35rem; font-weight: 560; letter-spacing: -0.02em; }}
+  .lp-stat span {{ color: {MUTED}; font-size: 0.82rem; }}
+
+  .lp-steps {{ display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); counter-reset: s; }}
+  .lp-step {{ display: flex; gap: 14px; background: {BG_1}; border: 1px solid {BORDER}; border-radius: 12px; padding: 16px; }}
+  .lp-step .num {{ counter-increment: s; flex: 0 0 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 0.75rem; color: {TEXT_2}; border: 1px solid {BORDER_STRONG}; background: {BG_2}; }}
+  .lp-step .num::before {{ content: counter(s); }}
+  .lp-step b {{ color: {TEXT}; font-weight: 500; font-size: 0.95rem; }}
+  .lp-step p {{ color: {MUTED}; font-size: 0.86rem; margin: 3px 0 6px; line-height: 1.5; }}
+  .lp-tag {{ display: inline-block; font-size: 0.7rem; padding: 1px 8px; border-radius: 999px; border: 1px solid {BORDER_STRONG}; color: {MUTED}; }}
+  .lp-tag.ai {{ color: #A5A4FF; border-color: {ACCENT}55; background: {ACCENT}14; }}
+
+  .lp-light {{ border-top: 2px solid var(--c); }}
+  .lp-light .dot {{ width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); display: inline-block; }}
+  .lp-light ul {{ margin: 10px 0 0; padding-left: 18px; color: {MUTED}; font-size: 0.86rem; }}
+
+  .lp-trip {{ display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }}
+  .lp-stop {{ flex: 1 1 200px; background: {BG_2}; border: 1px solid {BORDER_STRONG}; border-radius: 12px; padding: 16px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.35); }}
+  .lp-stop .where {{ font-weight: 600; font-size: 1.05rem; }}
+  .lp-stop .what {{ color: {MUTED}; font-size: 0.85rem; margin-top: 6px; line-height: 1.5; }}
+  .lp-arrow {{ flex: 0 0 56px; display: grid; place-items: center; color: {FAINT}; font-size: 1.2rem; }}
+
+  .lp-list {{ list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }}
+  .lp-list li {{ display: flex; gap: 10px; align-items: flex-start; color: {TEXT_2}; font-size: 0.92rem; line-height: 1.5;
+    background: {BG_1}; border: 1px solid {BORDER}; border-radius: 12px; padding: 14px 16px; }}
+  .lp-list li i {{ font-style: normal; color: {LIGHT_COLORS["green"]}; }}
+  .lp-list.never li i {{ color: {LIGHT_COLORS["red"]}; }}
+
+  .lp-chips {{ display: flex; flex-wrap: wrap; gap: 8px; }}
+  .lp-chip {{ border: 1px solid {BORDER}; background: {BG_1}; color: {TEXT_2}; border-radius: 999px; padding: 4px 12px; font-size: 0.82rem; }}
+
+  .lp-cta {{ text-align: center; padding: 56px 20px; margin-top: 64px; border-radius: 18px; border: 1px solid {BORDER};
+    background-color: {BG_1}; background-image: radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px); background-size: 18px 18px; }}
+  .lp-foot {{ color: {FAINT}; font-size: 0.8rem; text-align: center; padding: 28px 0 10px; }}
+</style>
+"""
+
+
 def inject_css() -> None:
+    st.markdown(_LANDING_CSS, unsafe_allow_html=True)
     st.markdown(_CSS, unsafe_allow_html=True)
 
 

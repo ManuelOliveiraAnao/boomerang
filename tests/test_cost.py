@@ -140,3 +140,70 @@ def test_infra_totals_exclude_ops_hours(prices, usage, ops):
     r = cost.compute(prices, usage, ops, today=BEFORE)
     assert r["totals"]["aws"] - r["totals"]["aws_infra"] == pytest.approx(10)
     assert r["totals"]["leaseweb"] - r["totals"]["leaseweb_infra"] == pytest.approx(20)
+
+
+# ---------------------------------------------------------------- partial migrations (docs/16 §3.4)
+def test_every_line_is_tagged_with_what_it_pays_for(prices, usage, ops):
+    r = cost.compute(prices, usage, ops, today=BEFORE)
+    assert all(ln["component"] for ln in r["lines"])
+    assert {ln["component"] for ln in r["lines"] if ln["item"].startswith("DynamoDB")} == {"kv_table"}
+    assert _line(r, "aws", "SQS")["component"] == "queue"
+    assert _line(r, "leaseweb", "Backups")["component"] == "kv_table"
+
+
+def test_full_placements_match_compute(prices, usage, ops):
+    r = cost.compute(prices, usage, ops, today=BEFORE)
+    c = cost.compare(prices, usage, ops, ["kv_table"], today=BEFORE)
+    assert c["aws"]["mode"] == "aws" and c["aws"]["total"] == r["totals"]["aws"]
+    assert c["selfhosted"]["mode"] == "selfhosted" and c["selfhosted"]["total"] == r["totals"]["leaseweb"]
+    assert c["aws"]["one_off"] == 0.0
+
+
+def test_hybrid_keeps_aws_services_of_kept_kinds_only(prices, usage, ops):
+    s = cost.scenario(prices, usage, ops, ["kv_table", "object_store"], today=BEFORE)
+    assert s["mode"] == "hybrid" and s["kept"] == ["queue"]
+    aws_items = {ln["item"] for ln in s["lines"] if ln["side"] == "aws"}
+    assert "SQS requests" in aws_items
+    assert not any(i.startswith(("DynamoDB", "S3", "Fargate")) for i in aws_items)
+    # the app runs on the self-hosted server, so it is in; the disk is needed for Postgres
+    lw_items = {ln["item"] for ln in s["lines"] if ln["side"] == "leaseweb"}
+    assert any(i.startswith("Server") for i in lw_items) and any(i.startswith("Network SSD") for i in lw_items)
+    assert s["total"] == round(sum(ln["cost_eur"] for ln in s["lines"]), 2)
+
+
+def test_hybrid_charges_traffic_back_from_aws(prices, usage, ops):
+    s = cost.scenario(prices, usage, ops, ["kv_table"], today=BEFORE, traffic_gb=150)
+    ln = _line(s, "aws", "Traffic from AWS")
+    assert ln["quantity"] == 50                       # 150 GB, first 100 free
+    assert ln["cost_eur"] == pytest.approx(50 * 0.1 * 0.5)
+
+
+def test_hybrid_scales_aws_ops_by_services_kept(prices, usage, ops):
+    s = cost.scenario(prices, usage, ops, ["kv_table"], today=BEFORE)
+    ln = _line(s, "aws", "Ops time")
+    assert ln["cost_eur"] == pytest.approx(10 * 2 / 3)
+
+
+def test_one_off_counts_only_the_data_that_moves(prices, usage, ops):
+    s = cost.scenario(prices, usage, ops, ["object_store"], today=BEFORE)
+    assert s["migration_gb"] == 10 and s["one_off"] == pytest.approx(10 * 0.1 * 0.5)
+    assert cost.scenario(prices, usage, ops, ["object_store"], today=AFTER)["one_off"] == 0.0
+
+
+def test_hybrid_traffic_estimate_follows_kept_services(usage):
+    assert cost.hybrid_traffic_gb(usage, set()) == 0
+    assert cost.hybrid_traffic_gb(usage, {"kv_table"}) == pytest.approx(1.0)      # 1M reads × 1 KB
+
+
+def test_per_component_splits_services_and_shared_base(prices, usage, ops):
+    pc = cost.per_component(prices, usage, ops, today=BEFORE)
+    r = cost.compute(prices, usage, ops, today=BEFORE)
+    aws = sum(v["aws"] for v in pc["components"].values()) + pc["shared"]["aws"]
+    lw = sum(v["selfhosted"] for v in pc["components"].values()) + pc["shared"]["selfhosted"]
+    assert aws == pytest.approx(r["totals"]["aws"]) and lw == pytest.approx(r["totals"]["leaseweb"])
+
+
+def test_missing_price_blocks_scenario_totals(prices, usage, ops):
+    prices["prices"] = [p for p in prices["prices"] if p["id"] != "aws.sqs.million"]
+    s = cost.scenario(prices, usage, ops, ["kv_table"], today=BEFORE)
+    assert s["total"] is None and "aws.sqs.million" in s["missing"]

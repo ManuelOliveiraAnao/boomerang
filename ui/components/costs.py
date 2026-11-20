@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from boomerang import cost
+from ui.components.cost_compare import compare_section
 from ui.data import Source
 from ui.theme import AWS_ORANGE, LEASEWEB_RED, LIGHT_COLORS
 
@@ -31,7 +32,8 @@ def _eur(x: float | None) -> str:
     return "–" if x is None else f"€{x:,.2f}"
 
 
-def _inputs(usage: dict, ops: dict) -> tuple[dict, dict, dt.date]:
+def _inputs(usage: dict, ops: dict) -> tuple[dict, dict, dt.date, float, dict]:
+    """Editable usage and ops. Returns (scaled usage, ops, migration date, scale, unscaled usage)."""
     u, o = copy.deepcopy(usage), copy.deepcopy(ops)
     with st.expander("Your usage and assumptions", expanded=False):
         st.caption("Defaults are ShopLite assumptions from pricing/usage.default.yaml and pricing/ops.yaml. "
@@ -43,7 +45,7 @@ def _inputs(usage: dict, ops: dict) -> tuple[dict, dict, dt.date]:
         with c1:
             st.markdown("**App usage / month**")
             u["orders_per_month"] = st.number_input("Orders", 0, value=int(usage["orders_per_month"]),
-                                                    step=10_000, key="cost_orders") * scale
+                                                    step=10_000, key="cost_orders")
             u["reads_per_order"] = st.number_input("Reads per order", 0, value=int(usage["reads_per_order"]),
                                                    key="cost_reads")
             u["writes_per_order"] = st.number_input("Writes per order", 0, value=int(usage["writes_per_order"]),
@@ -52,16 +54,15 @@ def _inputs(usage: dict, ops: dict) -> tuple[dict, dict, dt.date]:
                                                       value=int(usage["messages_per_order"]), key="cost_msgs")
         with c2:
             st.markdown("**Data**")
-            u["stored_gb_db"] = st.number_input("Database GB", 0.0, value=float(usage["stored_gb_db"]),
-                                                key="cost_db") * scale
+            u["stored_gb_db"] = st.number_input("Database GB", 0.0, value=float(usage["stored_gb_db"]), key="cost_db")
             u["stored_gb_objects"] = st.number_input("Object storage GB", 0.0,
-                                                     value=float(usage["stored_gb_objects"]), key="cost_obj") * scale
+                                                     value=float(usage["stored_gb_objects"]), key="cost_obj")
             u["egress_gb_month"] = st.number_input("Internet egress GB / month", 0.0,
-                                                   value=float(usage["egress_gb_month"]), key="cost_egress") * scale
+                                                   value=float(usage["egress_gb_month"]), key="cost_egress")
             u["migration_data_gb"] = st.number_input("Data to move once (GB)", 0.0,
-                                                     value=float(usage["migration_data_gb"]), key="cost_mig") * scale
+                                                     value=float(usage["migration_data_gb"]), key="cost_mig")
         with c3:
-            st.markdown("**Leaseweb setup**")
+            st.markdown("**Self-hosted setup (Leaseweb prices)**")
             u["lw_instance"] = st.selectbox("Server", list(INSTANCES), format_func=INSTANCES.get,
                                             index=list(INSTANCES).index(usage.get("lw_instance", "lw.instance.m3_large")),
                                             key="cost_inst")
@@ -82,7 +83,7 @@ def _inputs(usage: dict, ops: dict) -> tuple[dict, dict, dt.date]:
         o["hours_per_month"] = hpm
         o["aws_ops_hours"] = d5.number_input("AWS ops h", 0.0, value=float(ops.get("aws_ops_hours", 0)),
                                              key="cost_awsops")
-    return u, o, migration_date
+    return cost.scale_usage(u, scale), o, migration_date, float(scale), u
 
 
 def _table(lines: list[dict]) -> None:
@@ -113,9 +114,15 @@ def _total_card(title: str, color: str, total: float | None, infra: float | None
             f'<div style="color:#8A8F98;font-size:0.8rem">infrastructure {_eur(infra)} · {sub}</div></div>')
 
 
-def render(src: Source) -> None:
+def render(src: Source, rows: list[dict] | None = None) -> None:
     prices, usage, ops = _defaults()
-    u, o, migration_date = _inputs(usage, ops)
+    u, o, migration_date, scale, base = _inputs(usage, ops)
+    if rows:
+        compare_section(src, rows, prices, u, o, migration_date, scale, base)
+        st.markdown('<div class="sc-kicker" style="margin-top:34px">Line by line</div>'
+                    '<div class="sc-title" style="font-size:1.05rem">All on AWS against all self-hosted, '
+                    'every price with its source</div>', unsafe_allow_html=True)
+        st.write("")
     r = cost.compute(prices, u, o, today=migration_date)
 
     if r["missing"]:

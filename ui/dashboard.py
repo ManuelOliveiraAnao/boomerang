@@ -12,6 +12,7 @@ import streamlit as st
 
 from ui import data, live, runner, theme
 from ui.components import breaks, code, costs, roundtrip, setup
+from ui.components import scope as scope_tab
 
 APP_DIR = "sample-app/aws"
 
@@ -152,14 +153,25 @@ def render() -> None:
 
     _live_panel(src, mode)
 
-    t1, t2, t3, t4, t5 = st.tabs(["What breaks", "Code", "Leaseweb setup", "Data & round trip", "Costs"])
+    # Component rows feed What breaks, Placement and the cost comparison.
+    assessment = src.json("assessment") or summ.get("assessment")
+    assessment = breaks._as_dict(assessment) if assessment else None
+    rows = breaks.group_findings(assessment, breaks._load_pam(src)) if assessment else []
+
+    t1, t2, t3, t4, t5, t6 = st.tabs(["What breaks", "Placement", "Code", "Self-hosted setup",
+                                      "Data & round trip", "Costs"])
     with t1:
         breaks.render(src)
     with t2:
-        code.render(src)
+        if assessment:
+            scope_tab.render(src, rows, assessment)
+        else:
+            theme.empty_state("No assessment yet", "Placement needs a scan first.")
     with t3:
-        setup.render(src)
+        code.render(src)
     with t4:
-        roundtrip.render(src)
+        setup.render(src)
     with t5:
-        costs.render(src)
+        roundtrip.render(src)
+    with t6:
+        costs.render(src, rows)

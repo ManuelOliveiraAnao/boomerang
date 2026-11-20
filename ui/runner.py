@@ -54,7 +54,7 @@ def available() -> tuple[bool, str]:
 class Step:
     """One CLI call running in the background for a run."""
 
-    name: str                      # plan | approve | execute | roundtrip
+    name: str                      # plan | approve | execute | roundtrip | move-over | move-back
     run_id: str
     proc: subprocess.Popen
     log: Path
@@ -83,10 +83,14 @@ def _args(name: str, run_id: str, app_dir: str) -> list[str]:
         "approve": ["approve", run_id, "--by", "ui"],
         "execute": ["execute", run_id],
         "roundtrip": ["roundtrip", run_id],
+        # docs/16 §3.1: partial migrations (need C's scope support)
+        "move-over": ["move-over", run_id],
+        "move-back": ["move-back", run_id],
     }[name]
 
 
-def start(name: str, run_id: str, app_dir: str = "sample-app/aws", then: list[str] | None = None) -> Step:
+def start(name: str, run_id: str, app_dir: str = "sample-app/aws", then: list[str] | None = None,
+          extra: list[str] | None = None) -> Step:
     """Start `boomerang <name>` for this run in the background; output goes to runs/<id>/ui-<name>.log."""
     cli = _cli()
     if cli is None:
@@ -97,7 +101,7 @@ def start(name: str, run_id: str, app_dir: str = "sample-app/aws", then: list[st
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "NO_COLOR": "1",
            "COLUMNS": "120"}
     with log.open("w", encoding="utf-8") as fh:
-        proc = subprocess.Popen(cli + _args(name, run_id, app_dir), cwd=ROOT, stdout=fh,
+        proc = subprocess.Popen(cli + _args(name, run_id, app_dir) + list(extra or []), cwd=ROOT, stdout=fh,
                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env)
     return Step(name=name, run_id=run_id, proc=proc, log=log, then=list(then or []))
 

@@ -36,15 +36,19 @@ A's modules emit with `emit.emit(stage, message, level, **data)` and accept `emi
 ### 3.1 Recommended order
 1. Start from `role-c` (your latest).
 2. `git merge origin/role-a-platform-plan` → **no conflicts** in the rehearsal.
-3. `git merge origin/member-b-after-c1` → **8 conflicts** (§3.2).
+3. `git merge origin/member-b-after-c1` → **7 conflicts** (§3.2; re-rehearsed against Francisco's `51c6ff8`).
 4. Fix the tests in §3.4, then run §4.
 
-### 3.2 Conflicts when merging B (all 8 resolve the same way)
+### 3.2 Conflicts when merging B (all 7 resolve the same way)
+
+> **Re-rehearsed against `member-b-after-c1` @ `51c6ff8`** (Francisco merged A's old `80b78b5` and C's files into his branch, and wrote `docs/member-b-merge-guide.md`, which agrees with this guide). Result: `cli.py` and `events.py` **no longer conflict** (his copies equal `role-c`); **`tests/test_stubs.py` now conflicts** (keep C+A side: B's copy still lists C3's `slicer`/`rules`/`delock`/`storage` as stubs). Conflicting now: `boomerang/__init__.py`, `sovereign_sdk/__init__.py`, `lab.py`, `provisioner_aws.py`, `verifier.py`, `datamover.py`, `tests/test_stubs.py`. After resolving: A's files identical to `role-a-platform-plan`, real kv + storage, no `cli_platform.py`, **unit 443 passed / 12 failed (the same 12 stale tests in §3.4)**.
+
 B's branch still has A's **old** provisional copies of your shared files and A's **old** modules. For every one of these, **keep the side that is already in your branch** (C + A), e.g. `git checkout --ours <file>`:
 
 | File | Why B's side is wrong |
 |---|---|
-| `boomerang/__init__.py`, `sovereign_sdk/__init__.py`, `boomerang/events.py`, `boomerang/cli.py` | B's side = A's old provisional scaffold (callable `Emitter`, no `.emit`; old CLI) |
+| `boomerang/__init__.py`, `sovereign_sdk/__init__.py` (and, on older B commits, `events.py`, `cli.py`) | B's side = old provisional scaffold |
+| `tests/test_stubs.py` | B's side still lists C3's functions as stubs; keep C+A, then remove B's entries (§3.4) |
 | `boomerang/lab.py`, `provisioner_aws.py`, `verifier.py`, `datamover.py` | B's side = A's old API (`status()` dict, `run_pytest`/`laptop_env`/`freeze`, `move(aws_env, lw_env)`, nack-based queue code paths) |
 
 Checked in the rehearsal after resolving: **no A file was silently reverted** by the auto-merge (the RabbitMQ `reject` fix, A's tests, ShopLite and the lab are intact), **`cli_platform.py` did not come back**, and **`sovereign_sdk/kv.py` (B) and `storage.py` (C3) are the real implementations.** Still worth a quick `git diff origin/role-a-platform-plan -- sovereign_sdk/queue.py boomerang/verifier.py tests/sovereign_sdk/test_queue.py` after your merge: it should be empty.
@@ -53,7 +57,7 @@ Checked in the rehearsal after resolving: **no A file was silently reverted** by
 **Your rule 7 test failed** (`tests/test_rules.py::test_rule_7_adapter_calls[... MessageAttributes={} ...]`): rule 7 reads the adapter signatures with `inspect.signature`, and A's queue methods took `**kwargs`, so every argument looked supported. **Fixed in A's latest commit:** explicit signatures (exactly your stub's). With that, rule 7 passes. Make sure you merge A's **latest** commit.
 
 ### 3.4 Tests that fail after the merge: all stale "still a stub" assertions in C's tests
-Rehearsal result: **unit `pytest` → 441 passed, 12 failed** (with A's latest queue fix). All 12 assert that **B's** code is still a C1 stub, which it no longer is:
+Rehearsal result: **unit `pytest` → 441–443 passed, 12 failed** (443 with B @ `51c6ff8`) (with A's latest queue fix). All 12 assert that **B's** code is still a C1 stub, which it no longer is:
 
 | Test | Fix |
 |---|---|
@@ -64,7 +68,7 @@ Rehearsal result: **unit `pytest` → 441 passed, 12 failed** (with A's latest q
 
 **Integration `pytest -m integration` → 58 passed, 0 failed, 1 skipped.** The skip is your `tests/sovereign_sdk/test_storage.py` (needs `S3_TEST_ACCESS_KEY_ID` / `S3_TEST_SECRET_ACCESS_KEY` for an S3 endpoint, e.g. a running SeaweedFS). Also skipped by design in unit runs: `tests/test_datamover.py::test_leaseweb_side_without_kv_adapter_is_a_clear_error` ("B's real kv adapter is present").
 
-B's kv tests need `DATABASE_URL`; without it they skip silently. With `DATABASE_URL=postgresql://test:test@127.0.0.1:55432/test` they pass.
+B's kv tests need `DATABASE_URL`; without it they skip silently. With `DATABASE_URL=postgresql://test:test@127.0.0.1:55432/test` (A's lab test Postgres) they pass. Francisco's guide uses a separate container on port `54329` (`shoplite/shoplite/shoplite`); either works. Note: "12 removed" in his guide means the 12 stale tests are failing until you remove/update them; they don't pass on their own.
 
 ### 3.5 Other things to keep
 - `pyproject.toml`: A's additions to yours: `"moto[server]"` (lab process backend + tests), marker `slow`, `norecursedirs = ["fixtures", "data", ".venv", "runs"]` (tests/fixtures holds apps with their own tests; without it pytest collects them and errors).

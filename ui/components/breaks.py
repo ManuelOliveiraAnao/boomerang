@@ -141,6 +141,10 @@ def render(src: Source) -> None:
         st.progress(removed / 100)
     else:
         c4.metric("Lock-in removed", "–")
+    fc = {k: sum(f["light"] == k for f in assessment.get("findings", [])) for k in SEVERITY}
+    st.caption(f"Counters are per AWS component. Per feature: {fc['green']} config only · "
+               f"{fc['amber']} via adapter · {fc['red']} need a human "
+               f"({len(assessment.get('findings', []))} findings).")
 
     # ---- what moves ----
     worst = max((r["light"] for r in migrated), key=SEVERITY.get, default="green")

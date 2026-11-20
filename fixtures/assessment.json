@@ -232,11 +232,97 @@
       ]
     },
     {
+      "analysis": "S3-compatible API; list behavior is preserved",
+      "component_id": "receipts",
+      "feature": "list",
+      "light": "green",
+      "what_changes": "S3-compatible API; list behavior is preserved",
+      "evidence": [
+        {
+          "file": "app/storage.py",
+          "line": 16,
+          "symbol": "put_receipt",
+          "operation": "put_object",
+          "snippet": "s3.put_object(Bucket=_bucket(), Key=key, Body=json.dumps(receipt).encode(\"utf-8\"),\n                  ContentType=\"application/json\")"
+        },
+        {
+          "file": "app/storage.py",
+          "line": 23,
+          "symbol": "get_receipt",
+          "operation": "get_object",
+          "snippet": "s3.get_object(Bucket=_bucket(), Key=f\"receipts/{order_id}.json\")"
+        }
+      ]
+    },
+    {
+      "analysis": "S3-compatible API; delete behavior is preserved",
+      "component_id": "receipts",
+      "feature": "delete",
+      "light": "green",
+      "what_changes": "S3-compatible API; delete behavior is preserved",
+      "evidence": [
+        {
+          "file": "app/storage.py",
+          "line": 16,
+          "symbol": "put_receipt",
+          "operation": "put_object",
+          "snippet": "s3.put_object(Bucket=_bucket(), Key=key, Body=json.dumps(receipt).encode(\"utf-8\"),\n                  ContentType=\"application/json\")"
+        },
+        {
+          "file": "app/storage.py",
+          "line": 23,
+          "symbol": "get_receipt",
+          "operation": "get_object",
+          "snippet": "s3.get_object(Bucket=_bucket(), Key=f\"receipts/{order_id}.json\")"
+        }
+      ]
+    },
+    {
       "analysis": "Lambda functions are not migrated",
       "component_id": "receipt_thumbnailer",
       "feature": "event_notification",
       "light": "red",
       "what_changes": "Lambda functions are not migrated",
+      "evidence": []
+    },
+    {
+      "analysis": "Postgres adapter changes the DynamoDB storage implementation",
+      "component_id": "orders",
+      "feature": "put",
+      "light": "amber",
+      "what_changes": "Postgres adapter changes the DynamoDB storage implementation",
+      "evidence": []
+    },
+    {
+      "analysis": "Postgres adapter changes the DynamoDB storage implementation",
+      "component_id": "orders",
+      "feature": "get",
+      "light": "amber",
+      "what_changes": "Postgres adapter changes the DynamoDB storage implementation",
+      "evidence": []
+    },
+    {
+      "analysis": "Postgres adapter supports SET updates",
+      "component_id": "orders",
+      "feature": "update",
+      "light": "amber",
+      "what_changes": "Postgres adapter supports SET updates",
+      "evidence": []
+    },
+    {
+      "analysis": "Postgres adapter changes the DynamoDB storage implementation",
+      "component_id": "orders",
+      "feature": "delete",
+      "light": "amber",
+      "what_changes": "Postgres adapter changes the DynamoDB storage implementation",
+      "evidence": []
+    },
+    {
+      "analysis": "Postgres adapter emulates key and GSI queries",
+      "component_id": "orders",
+      "feature": "query",
+      "light": "amber",
+      "what_changes": "Postgres adapter emulates key and GSI queries",
       "evidence": []
     },
     {
@@ -313,6 +399,6 @@
     }
   ],
   "overall": "red",
-  "summary": "17 migration findings",
-  "source": "B assess() on scan_static(A sample-app/aws), generated 2026-11-20"
+  "summary": "24 migration findings",
+  "source": "B assess() on scan_static(A sample-app/aws), B@680c7c6 A@483afdb, 2026-11-20"
 }

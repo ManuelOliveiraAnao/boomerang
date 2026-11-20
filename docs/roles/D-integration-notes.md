@@ -57,6 +57,28 @@ Snapshot of `origin/role-a-platform-plan` (A) and `origin/Francisco-membro-b-dev
 4. **Generator default output is `runs/leaseweb/`**, not `runs/<id>/leaseweb/`. The pipeline must pass `out_dir`, or replay can't find the files per run.
 5. **Secrets on screen:** see Tab 3.
 
+## 5. Review: does the UI match the project? (B@680c7c6, A@483afdb, no C branch)
+
+**Matches the spec ([05](../05-ui.md), README):** sidebar (source app, Migrate, Round trip, Live/Replay, LLM badge) · 5 tabs · What breaks has lights, evidence, counters, lock-in, red box, Approve · Costs follows [12](../12-costs.md) exactly (sources, missing-price refusal, ops hours, EU Data Act date) · the landing page's 9 steps, 3 lights, round trip and "never claim" list match the README and [09](../09-demo-deploy-pitch.md). Extra vs spec: the Overview landing page.
+
+**Gaps that depend on others:**
+| UI part | Status | Blocked by |
+|---|---|---|
+| Migrate / Round trip buttons, live feed, Approve → pipeline continues | placeholder toast | **C (no branch yet):** `pipeline.py`, `cli.py`, events wiring |
+| Code tab (diffs, fixer) | empty state | **C:** `delock.py`, `fixer.py` |
+| "Local AI" badge, "AI never sees secrets" on the landing page | true only once C's `llm.py` + `redact.py` exist | **C** |
+| Leaseweb setup tab | empty state (D5) | B's generator exists; A's verifier exists. Can be built now on a generated run |
+| Data & round trip tab | empty state (D6) | A's data mover exists (25/25/3 → 26 after round trip, as in the pitch) |
+
+**Can be done without C:** A now has `cli_platform.py` (`lab`, `aws provision/test`, `verify`, `data`). The UI could call A's `verify()` and `datamover.move()` and B's `generators.leaseweb.render()` directly to fill tabs 3 and 4 live, if C is late.
+
+**Mismatches to fix:**
+1. **Counters:** [05](../05-ui.md) / [09](../09-demo-deploy-pitch.md) say "1 🟢 · 4 🟠 · 3 🔴". The UI counts components (now **1 · 3 · 3**, 1 · 2 · 3 once B folds the DLQ into `order_events`); per feature B now gives **4 · 16 · 4** (24 findings). The tab shows both now; the pitch script must quote one of them.
+2. **Scanner (B), still open after B's fixes:** `orders` still has **0 code usages** (calls go through `_table()`, a function return, which the new `x = dynamodb.Table(...)` fix doesn't follow); `conditional_write` not detected although A's `db.py` now uses `attribute_not_exists` *and* `attribute_exists`; `order_events_dlq` still a separate component; `app_name` is `"aws"`, `entrypoints` empty. The pitch says "the scan found every AWS dependency in code", which is **not true yet** for DynamoDB.
+3. **Costs vs pitch:** [09](../09-demo-deploy-pitch.md) closes with costs as a selling point. With the default ShopLite usage AWS is cheaper (€89.52 vs €392.29/month, ops hours dominate); Leaseweb wins from ~×50 traffic. The script should say "it depends on size, here's the proof", or demo at a larger scale.
+4. **Secrets:** B's generator still writes passwords into `secrets.env` and the compose file. D5 must mask them on screen.
+5. **A's RabbitMQ DLQ behaviour is unverified** (no Docker on A's laptop, see `docs/roles/A-testing-status.md` N1). Don't claim "DLQ after 3 receives" in the demo until it runs on real RabbitMQ.
+
 ## 4. Found while building D3 (tell B)
 Ran B's `scan_static()` + `assess()` on A's real ShopLite (`sample-app/aws`). Output saved as `fixtures/pam.scanned.json` and `fixtures/assessment.json`.
 - **`orders` (DynamoDB) has 0 code usages:** the scanner misses every call in `app/db.py`, so the DynamoDB card shows no evidence. It also loses `conditional_write`.

@@ -180,7 +180,8 @@ class KV:
         return Table(self, name)
 
     def close(self) -> None:
-        self.connection.close()
+        if self.connection is not None:
+            self.connection.close()
 
 
 class Key:

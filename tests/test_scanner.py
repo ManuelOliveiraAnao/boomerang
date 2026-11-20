@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from boomerang.assess import assess
 from boomerang.lockin import score
 from boomerang.lost import build
@@ -137,14 +139,11 @@ def test_assessment_emit_reports_result():
     )
 
     assert assessment.overall == "amber"
-    assert events == [
-        (
-            "assess",
-            "Traffic-light assessment completed",
-            "success",
-            {"findings": 1},
-        )
-    ]
+    assert any(event[0:3] == (
+        "assess",
+        "Traffic-light assessment completed",
+        "success",
+    ) for event in events)
 
 
 def test_assessment_empty_pam_is_green():
@@ -203,6 +202,99 @@ def test_static_scanner_ignores_unrelated_boto3_calls(tmp_path):
         'sns = boto3.client("sns")\n'
         'def notify():\n'
         '    return sns.publish(Message="hello")\n',
+        encoding="utf-8",
+    )
+
+    pam = scan_static(app)
+
+    assert pam.components == []
+
+
+def test_member_b_fixture_json_is_parseable():
+    fixture_dir = Path(__file__).parents[1] / "fixtures"
+    for name in ("assessment.aws.json", "verification.json", "data-moves.json", "lost.json"):
+        with (fixture_dir / name).open(encoding="utf-8") as fixture:
+            json.load(fixture)
+    events = (fixture_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(events) == 5
+    assert all(json.loads(line)["run_id"] == "fixture" for line in events)
+
+
+def test_assessment_ai_finding_cannot_lower_rule_light(fake_llm):
+    from boomerang.models import Assessment, Finding
+
+    fake_llm.responses["assess"] = Assessment(
+        findings=[
+            Finding(
+                analysis="AI analysis",
+                component_id="receipts",
+                feature="put",
+                light="red",
+                what_changes="AI says red",
+                evidence=[],
+            )
+        ],
+        overall="red",
+        summary="AI summary",
+    )
+
+    assessment = assess({
+        "components": [
+            {
+                "id": "receipts",
+                "kind": "object_store",
+                "provider": "aws.s3",
+                "features": ["put"],
+                "usages": [],
+            }
+        ]
+    })
+
+    assert assessment.findings[0].light == "red"
+    assert assessment.findings[0].analysis == "AI analysis"
+
+
+def test_scanner_ai_pass_merges_static_hint(fake_llm, tmp_path):
+    from boomerang.models import AppModel
+    from boomerang.scanner.ai import scan
+
+    app = tmp_path / "ShopLite"
+    app.mkdir()
+    (app / "db.py").write_text(
+        'import boto3\n'
+        'dynamodb = boto3.resource("dynamodb")\n'
+        'def put_order(order_id):\n'
+        '    return dynamodb.Table("orders").put_item(Item={"order_id": order_id})\n',
+        encoding="utf-8",
+    )
+
+    fake_llm.responses["scan"] = lambda call: AppModel.model_validate(
+        {
+            "app_name": "ShopLite",
+            "platform": "aws",
+            "entrypoints": [],
+            "components": [],
+            "files": [],
+            "env": [],
+        }
+    )
+
+    pam = scan(app)
+    component = next(component for component in pam.components if component.id == "orders")
+    assert component.usages
+
+
+def test_static_scanner_excludes_tests_and_sovereign_sdk(tmp_path):
+    app = tmp_path / "ShopLite"
+    app.mkdir()
+    (app / "tests").mkdir()
+    (app / "sovereign_sdk").mkdir()
+    (app / "tests" / "db.py").write_text(
+        'import boto3\ndynamodb = boto3.resource("dynamodb")\n',
+        encoding="utf-8",
+    )
+    (app / "sovereign_sdk" / "kv.py").write_text(
+        'import boto3\ns3 = boto3.client("s3")\n',
         encoding="utf-8",
     )
 

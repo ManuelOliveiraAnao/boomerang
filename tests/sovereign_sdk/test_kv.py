@@ -25,8 +25,9 @@ def _table_name() -> str:
 @pytest.fixture
 def table():
     kv = resource(os.getenv("DATABASE_URL"))
+    connection = kv._get_connection()
     table_name = _table_name()
-    kv.connection.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+    connection.execute(f'DROP TABLE IF EXISTS "{table_name}"')
     component = {
         "id": "orders",
         "resource_name": table_name,
@@ -40,11 +41,11 @@ def table():
             }
         ],
     }
-    kv.connection.execute(ddl(component))
-    kv.connection.commit()
+    connection.execute(ddl(component))
+    connection.commit()
     yield kv.Table(table_name)
-    kv.connection.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-    kv.connection.commit()
+    connection.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+    connection.commit()
     kv.close()
 
 
@@ -101,7 +102,7 @@ def test_attribute_exists_condition(table):
 
 
 def test_sort_key_round_trip(table):
-    kv = table.connection
+    kv = table.owner._get_connection()
     table_name = "events_test"
     kv.execute(f'DROP TABLE IF EXISTS "{table_name}"')
     component = {

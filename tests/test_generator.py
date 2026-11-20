@@ -232,3 +232,39 @@ def test_rabbitmq_definition_uses_shared_queue_arguments(tmp_path):
     assert queues["order-events"]["arguments"]["x-delivery-limit"] == expected["x-delivery-limit"]
     assert queues["order-events"]["arguments"]["x-dead-letter-exchange"] == expected["x-dead-letter-exchange"]
     assert queues["order-events"]["arguments"]["x-dead-letter-routing-key"] == expected["x-dead-letter-routing-key"]
+
+
+def test_render_is_pure_by_default():
+    pam = json.loads(
+        (Path(__file__).parents[1] / "fixtures" / "pam.aws.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    secrets = {
+        "POSTGRES_PASSWORD": "postgres-password",
+        "RABBITMQ_PASSWORD": "rabbit-password",
+        "SEAWEEDFS_ACCESS_KEY": "access-key",
+        "SEAWEEDFS_SECRET_KEY": "secret-key",
+    }
+
+    files = render(pam, secrets)
+    paths = {generated.path for generated in files}
+
+    assert "docker-compose.yml" in paths
+    assert "secrets.env" in paths
+    assert "laptop.env" in paths
+    assert all(generated.path != "app/sovereign_sdk/kv.py" for generated in files)
+
+
+def test_make_secrets_returns_only_secret_values():
+    from boomerang.generators.leaseweb import make_secrets
+
+    secrets = make_secrets()
+
+    assert set(secrets) == {
+        "POSTGRES_PASSWORD",
+        "RABBITMQ_PASSWORD",
+        "SEAWEEDFS_ACCESS_KEY",
+        "SEAWEEDFS_SECRET_KEY",
+    }
+    assert all(len(value) >= 24 for value in secrets.values())

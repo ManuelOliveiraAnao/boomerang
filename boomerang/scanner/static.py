@@ -119,6 +119,8 @@ def scan_static(app_dir: Path, exclude: tuple[str, ...] = ("tests", "sovereign_s
             continue
         if "__pycache__" in path.parts:
             continue
+        if any(part in exclude for part in path.parts):
+            continue
         relative = path.relative_to(app_dir).as_posix()
 
         if path.suffix == ".py":

@@ -1,0 +1,31 @@
+[
+  {
+    "direction": "aws->leaseweb",
+    "counts": [
+      {
+        "component_id": "orders",
+        "kind": "kv_table",
+        "source_count": 25,
+        "target_count": 25,
+        "checksum_match": true,
+        "notes": []
+      },
+      {
+        "component_id": "receipts",
+        "kind": "object_store",
+        "source_count": 25,
+        "target_count": 25,
+        "checksum_match": true,
+        "notes": []
+      },
+      {
+        "component_id": "order_events",
+        "kind": "queue",
+        "source_count": 3,
+        "target_count": 3,
+        "checksum_match": true,
+        "notes": ["Pending messages moved before cut-over"]
+      }
+    ]
+  }
+]

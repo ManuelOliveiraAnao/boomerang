@@ -1,0 +1,46 @@
+{
+  "findings": [
+    {
+      "analysis": "DynamoDB item operations move to the Postgres-backed KV adapter.",
+      "component_id": "orders",
+      "feature": "conditional_write",
+      "light": "amber",
+      "what_changes": "ConditionExpression is limited to attribute_not_exists and attribute_exists.",
+      "evidence": []
+    },
+    {
+      "analysis": "SQS delivery semantics are mapped to RabbitMQ.",
+      "component_id": "order_events",
+      "feature": "dlq",
+      "light": "amber",
+      "what_changes": "The DLQ is emulated with a quorum queue and dead-letter routing.",
+      "evidence": []
+    },
+    {
+      "analysis": "S3 basic object operations remain compatible.",
+      "component_id": "receipts",
+      "feature": "put",
+      "light": "green",
+      "what_changes": "The S3 endpoint and credentials change only.",
+      "evidence": []
+    },
+    {
+      "analysis": "Lambda is not migrated by this generator.",
+      "component_id": "receipt_thumbnailer",
+      "feature": "event_notification",
+      "light": "red",
+      "what_changes": "The S3 notification and Lambda side effect need human review.",
+      "evidence": []
+    },
+    {
+      "analysis": "IAM credentials are not migrated automatically.",
+      "component_id": "shoplite_task",
+      "feature": "role",
+      "light": "red",
+      "what_changes": "Use the generated scoped service credentials.",
+      "evidence": []
+    }
+  ],
+  "overall": "red",
+  "summary": "5 migration findings"
+}

@@ -5,6 +5,7 @@ secrets.env
 !.env.example
 !**/.env.example
 !**/*.j2
+!**/*.j2
 
 # Python
 __pycache__/

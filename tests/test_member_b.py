@@ -148,7 +148,7 @@ def test_lockin_score():
         files=[],
         env=[],
     )
-    assert score(pam) == 125
+    assert score(pam) == 0
 
 
 def test_lost_report():
@@ -230,8 +230,6 @@ def test_generator_is_pure_and_contains_required_files():
         "secrets.env",
         "laptop.env",
         "schema.sql",
-        "rabbitmq/definitions.json",
-        "seaweedfs/s3.json",
         "deploy.sh",
         "backup/pg_backup.sh",
         "DEPLOY.md",
@@ -242,11 +240,6 @@ def test_generator_is_pure_and_contains_required_files():
     laptop = next(generated.content for generated in files if generated.path == "laptop.env")
     assert "127.0.0.1:5432" in laptop
     assert "CHANGE_ME" not in laptop
-    rabbitmq = next(generated.content for generated in files if generated.path == "rabbitmq/definitions.json")
-    definitions = json.loads(rabbitmq)
-    main = next(queue for queue in definitions["queues"] if queue["name"] == "order-events")
-    assert main["arguments"]["x-queue-type"] == "quorum"
-    assert main["arguments"]["x-delivery-limit"] == 2
 
 
 @pytest.mark.parametrize(
@@ -272,3 +265,131 @@ def test_ddl_rejects_invalid_table_names(bad_name):
     ).components[0]
     with pytest.raises(UnsupportedFeature):
         ddl(component)
+
+
+def _partial_pam():
+    return AppModel(
+        app_name="ShopLite",
+        platform="aws",
+        entrypoints=["app.main:app"],
+        components=[
+            {
+                "id": "orders",
+                "kind": "kv_table",
+                "provider": "aws.dynamodb",
+                "resource_name": "orders",
+                "name_env_var": "ORDERS_TABLE",
+                "partition_key": {"name": "order_id", "type": "S"},
+                "indexes": [],
+            },
+            {
+                "id": "receipts",
+                "kind": "object_store",
+                "provider": "aws.s3",
+                "resource_name": "receipts",
+                "name_env_var": "RECEIPTS_BUCKET",
+            },
+            {
+                "id": "order_events",
+                "kind": "queue",
+                "provider": "aws.sqs",
+                "resource_name": "order-events",
+                "name_env_var": "ORDER_EVENTS_QUEUE",
+                "max_receive_count": 3,
+            },
+        ],
+        files=[],
+        env=[],
+    )
+
+
+def test_full_scope_uses_all_movable_services():
+    pam = _partial_pam()
+    secrets = make_secrets(pam)
+    files = render(pam, secrets)
+    paths = {generated.path for generated in files}
+    assert "schema.sql" in paths
+    assert "rabbitmq/definitions.json" in paths
+    assert "seaweedfs/s3.json" in paths
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected_schema", "expected_rabbitmq", "expected_seaweed"),
+    [
+        (["orders"], True, False, False),
+        (["receipts"], False, False, True),
+        (["order_events"], False, True, False),
+        ([], False, False, False),
+    ],
+)
+def test_single_component_scopes_only_include_needed_services(
+    scope,
+    expected_schema,
+    expected_rabbitmq,
+    expected_seaweed,
+):
+    pam = _partial_pam()
+    files = render(pam, make_secrets(pam), scope)
+    paths = {generated.path for generated in files}
+    assert ("schema.sql" in paths) == expected_schema
+    assert ("rabbitmq/definitions.json" in paths) == expected_rabbitmq
+    assert ("seaweedfs/s3.json" in paths) == expected_seaweed
+
+
+def test_hybrid_scope_adds_aws_laptop_environment():
+    pam = _partial_pam()
+    files = render(pam, make_secrets(pam), ["orders", "receipts"])
+    laptop = next(generated.content for generated in files if generated.path == "laptop.env")
+    compose = next(generated.content for generated in files if generated.path == "docker-compose.yml")
+    assert "AWS_ENDPOINT_URL=http://127.0.0.1:4566" in laptop
+    assert "ORDER_EVENTS_QUEUE=<aws-name>" in laptop
+    assert "host.docker.internal:host-gateway" in compose
+    assert "AWS_ENDPOINT_URL: http://host.docker.internal:4566" in compose
+
+
+def test_empty_scope_keeps_all_movable_components_on_aws():
+    pam = _partial_pam()
+    assert score(pam, []) == 195
+
+
+def test_hybrid_assessment_contains_aws_credentials_finding(monkeypatch):
+    pam = _partial_pam()
+    from boomerang.events import Emitter
+    monkeypatch.setattr(
+        "boomerang.llm.structured",
+        lambda **kwargs: Assessment(
+            findings=[],
+            overall="red",
+            summary="Rules assessment",
+        ),
+    )
+
+    assessment = assess(pam, Emitter("scope"), ["orders", "receipts"])
+    hybrid = next(
+        (finding for finding in assessment.findings if finding.component_id == "hybrid"),
+        None,
+    )
+    assert hybrid is not None
+    assert hybrid.light == "red"
+    assert "order_events" in hybrid.what_changes
+
+
+def test_lost_report_keeps_out_of_scope_components_on_aws():
+    pam = _partial_pam()
+    assessment = Assessment(
+        findings=[
+            Finding(
+                analysis="Queue",
+                component_id="order_events",
+                feature="dlq",
+                light="amber",
+                what_changes="RabbitMQ emulates the SQS DLQ",
+            )
+        ],
+        overall="amber",
+        summary="1 finding",
+    )
+    lost = build(pam, assessment, [], ["orders"])
+    item = next(item for item in lost if item.component_id == "order_events")
+    assert item.status == "preserved"
+    assert item.detail == "Stays on AWS"

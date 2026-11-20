@@ -138,6 +138,19 @@ class LostItem(BaseModel):
     status: Literal["preserved", "changed", "lost"]
     detail: str
 
+class Scope(BaseModel):
+    selfhosted: list[str]
+
+    def has(self, component_id: str) -> bool:
+        return component_id in self.selfhosted
+
+class ScopeStep(BaseModel):
+    at: float
+    action: Literal["move_over", "move_back"]
+    components: list[str]
+    verification_ok: bool | None = None
+    data_moves: list[DataMove] = []
+
 # ---------- L1: lead additions (not LLM-facing) ----------
 class GeneratedFile(BaseModel):          # L1: B6 returns these
     path: str                            # relative to runs/<id>/leaseweb/
@@ -189,3 +202,5 @@ class RunSummary(BaseModel):
     roundtrip_checks: list[Check] = []           # count checks + "new order exists on AWS" (D's tab 4)
     roundtrip_tests: TestReport | None = None    # original tests on AWS after the copy back
     fixtures_used: list[str] = []                # L9: stages that ran on fixtures (report and UI show ⚠️)
+    scope: Scope | None = None
+    steps: list[ScopeStep] = []

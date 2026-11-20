@@ -17,7 +17,26 @@ def test_demo_incident_matches_the_contract():
 
 
 def test_runner_sends_the_doctor_commands_of_the_guide():
-    assert runner._args("doctor", "r1", "app") == ["doctor", "r1"]
+    assert runner._args("doctor", "r1", "app") == ["doctor", "diagnose", "r1"]
     assert runner._args("doctor-fix", "r1", "app", args=["move_back", "orders"]) == \
         ["doctor", "fix", "r1", "move_back", "orders", "--by", "ui"]
     assert runner._args("doctor-break", "r1", "app", args=["postgres"]) == ["doctor", "break", "r1", "postgres"]
+
+
+def test_ui_commands_parse_with_the_real_cli():
+    """The arguments the UI sends are accepted by C's typer CLI (parsing only, nothing runs)."""
+    import typer.main
+
+    from boomerang.cli import app
+    group = typer.main.get_command(app).commands["doctor"]
+    for name, args in (("doctor", None), ("doctor-fix", ["restart_service", "postgres"]),
+                       ("doctor-break", ["postgres"])):
+        argv = runner._args(name, "r1", "app", args=args)[1:]          # drop the leading "doctor"
+        sub = group.commands[argv[0]]
+        ctx = sub.make_context(sub.name, list(argv[1:]))                 # raises if the arguments don't fit
+        assert ctx.params["run_id"] == "r1"
+        if name == "doctor-fix":
+            assert (ctx.params["action_id"], ctx.params["target"], ctx.params["by"]) == \
+                ("restart_service", "postgres", "ui")
+        if name == "doctor-break":
+            assert ctx.params["service"] == "postgres"

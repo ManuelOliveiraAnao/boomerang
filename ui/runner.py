@@ -89,7 +89,7 @@ def _args(name: str, run_id: str, app_dir: str, components: list[str] | None = N
         "move-over": ["move-over", run_id, only, "--by", "ui"],
         "move-back": ["move-back", run_id, only, "--by", "ui"],
         # Doctor (docs/18 §5): diagnose; apply one approved fix (args: action id, target); demo break (args: service)
-        "doctor": ["doctor", run_id],
+        "doctor": ["doctor", "diagnose", run_id],
         "doctor-fix": ["doctor", "fix", run_id, *(args or []), "--by", "ui"],
         "doctor-break": ["doctor", "break", run_id, *(args or [])],
     }[name]

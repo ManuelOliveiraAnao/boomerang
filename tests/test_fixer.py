@@ -6,14 +6,14 @@ import shutil
 from pathlib import Path
 
 import pytest
-from test_delock import GET_ORDER, LIST_BY_CUSTOMER, MINI_APP, Run, make_run
-from test_pipeline import llm, source, verification, world  # noqa: F401 - fixtures for the pipeline test
 
 from boomerang import fixer, pipeline
 from boomerang import llm as llm_mod
 from boomerang.events import read_events
 from boomerang.fsutil import hash_tree
 from boomerang.models import FixResult, FunctionRewrite, RewriteRecord, TestFailure, TestReport
+from tests.test_delock import GET_ORDER, LIST_BY_CUSTOMER, MINI_APP, Run, make_run
+from tests.test_pipeline import llm, source, verification, world  # noqa: F401 - fixtures for the pipeline test
 
 REAL_FIX = fixer.fix                     # test_pipeline's `world` replaces it with a fake
 

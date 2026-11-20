@@ -10,7 +10,14 @@ from typing import Any
 
 import pytest
 from botocore.stub import Stubber
-from test_pipeline import (  # noqa: F401 - fixtures
+from typer.testing import CliRunner
+
+from boomerang import pipeline
+from boomerang.cli import app as cli_app
+from boomerang.events import read_events
+from boomerang.models import DataCount, DataMove, GeneratedFile, LostItem, TestReport
+from boomerang.pipeline import PipelineError
+from tests.test_pipeline import (  # noqa: F401 - fixtures
     World,
     llm,
     make_report,
@@ -19,13 +26,6 @@ from test_pipeline import (  # noqa: F401 - fixtures
     source,
     world,
 )
-from typer.testing import CliRunner
-
-from boomerang import pipeline
-from boomerang.cli import app as cli_app
-from boomerang.events import read_events
-from boomerang.models import DataCount, DataMove, GeneratedFile, LostItem, TestReport
-from boomerang.pipeline import PipelineError
 
 ORDER_ID = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 
@@ -316,7 +316,8 @@ def test_subprocess_env_is_an_allowlist(monkeypatch):
 
 def test_dynamodb_lookup_uses_the_aws_env_and_a_consistent_read(monkeypatch):
     import boto3
-    from test_delock import MINI_APP, mini_pam
+
+    from tests.test_delock import MINI_APP, mini_pam
 
     client = boto3.client("dynamodb", region_name="us-east-1", endpoint_url="http://127.0.0.1:4566",
                           aws_access_key_id="test", aws_secret_access_key="test")

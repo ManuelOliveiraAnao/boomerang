@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from test_delock import GET_ORDER, LIST_BY_CUSTOMER, MINI_APP, mini_assessment, mini_pam
 from typer.testing import CliRunner
 
 from boomerang import pipeline, report
@@ -37,6 +36,7 @@ from boomerang.models import (
     Verification,
 )
 from boomerang.pipeline import NotApproved, PipelineError, RunExists
+from tests.test_delock import GET_ORDER, LIST_BY_CUSTOMER, MINI_APP, mini_assessment, mini_pam
 
 SECRET = "pw-Zq8xR2mN5vL1kT7c"
 

@@ -15,9 +15,6 @@ from typing import Any
 
 import pytest
 from pydantic import BaseModel
-from test_delock import GET_ORDER, LIST_BY_CUSTOMER
-from test_fixer import BROKEN_GET_ORDER, FIXED
-from test_pipeline import SECRET, World, llm, root_of, source, verification, world  # noqa: F401 - fixtures
 from typer.testing import CliRunner
 
 from boomerang import democache, pipeline
@@ -27,6 +24,9 @@ from boomerang.cli import app as cli_app
 from boomerang.config import get_settings
 from boomerang.events import read_events
 from boomerang.models import FunctionRewrite, TestFailure
+from tests.test_delock import GET_ORDER, LIST_BY_CUSTOMER
+from tests.test_fixer import BROKEN_GET_ORDER, FIXED
+from tests.test_pipeline import SECRET, World, llm, root_of, source, verification, world  # noqa: F401 - fixtures
 
 REAL_STRUCTURED = llm_mod.structured          # `world` (through fake_llm) replaces both of these
 REAL_FIX = fixer_mod.fix

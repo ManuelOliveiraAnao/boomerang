@@ -9,6 +9,8 @@
 > - `pytest` → unit tests only (~35 s, no Docker).
 > - `boomerang lab up` + `python -c "from boomerang import lab; lab.up(adapters=True)"`, then `pytest -m integration` → fake AWS, real RabbitMQ, real Postgres, real stack boot.
 >
+> **Latest results:** A's branch: `pytest` → **190 passed**, `pytest -m integration` → **57 passed, 0 failed**. Rehearsed A+B+C merge: integration **58 passed, 1 skipped** (C's storage test needs S3 creds); unit 441 passed, 12 failed (all stale "still a stub" asserts in C's tests; see A-handoff-for-integration.md §3.4).
+>
 > **Docker is installed now.** Section 2 below was written before that; N1–N4 and N7 have since been run: real RabbitMQ found the `nack` vs `reject` dead-letter bug (fixed), and the minimal stack boots.
 
 Last full run before Docker: **102 passed, 20 skipped, 0 failed** (`pytest -q`, about 4½ minutes; `pytest -q -m "not slow"` skips the 1,000-object copy test and takes about 2 minutes).

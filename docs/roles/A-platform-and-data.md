@@ -4,7 +4,23 @@
 
 **Tasks:** A1 lab · A2 ShopLite · A3 AWS provisioner + seed · A4 `sovereign_sdk.queue` · A5 verifier · A6 data mover · A7 golden run + video + submission ([07](../07-team-and-tasks.md)).
 
-> ⚠️ **Top risk for this role: Docker.** Every A task needs Docker. The laptop this repo was created on has **no Docker installed**. Install Docker Desktop (with WSL2 on Windows) and pull the images **before** the event (§1).
+> ## ✅ Current state (read this first)
+> This file is the **original build plan**. A1–A6 are built and tested; A7 is not started. Since this plan was written:
+> - **A's API now follows C's contract (docs/15 L4/L5/L8/L13/L15/L17).** The names in §3–§9 below are the *planned* ones; the real ones are:
+>
+>   | Plan said (§3–§9) | Real API now |
+>   |---|---|
+>   | `lab.status() -> dict`, `lab.reset_moto()` | `lab.status() -> bool`, `lab.reset()`; per-service view: `lab.services()` |
+>   | `provision(pam, seed=, run_tag=)`, `seed_shoplite(env, …)` | `provision(pam, emit=None)`, `seed(pam, count=25, emit=None)` (`seed_shoplite` is internal) |
+>   | `run_pytest(app_dir, tests_dir, env, platform, attempt)` | `run_tests(app_dir, env, platform, attempt, emit)` (runs `app_dir/tests`); `run_pytest` stays as a helper |
+>   | `laptop_env()`, `reset_stack()`, `freeze()` | `leaseweb_env()`, `reset_data()` (empties data, keeps schema), `stop_service()/start_service()`; plus `aws_env()` |
+>   | `move(pam, direction, aws_env, lw_env)` | `move(pam, direction, src_env, dst_env, emit)`: **src/dst follow the direction** |
+>   | `boomerang aws provision/test`, `boomerang data <dir>` (A's `cli_platform.py`) | removed; C's CLI: `boomerang lab up/down/status`, `verify <run_id>`, `data <run_id>` |
+>
+> - **Queue adapter:** expired messages use `basic_reject` (RabbitMQ 4 ignores `nack` for the delivery limit; verified); signatures are explicit (no `**kwargs`) so C's rule 7 can check AI-written calls.
+> - **Test env** is an allowlist (§8.3's "copy os.environ minus …" was replaced, L8). **Worker** is stopped while tests run (L4). **`secrets.env`** is passed to `docker compose`.
+> - **§9.3's rollback proposal** ("copy back into the existing AWS tables") was superseded by C's L5: roll back into a **fresh** moto. The data mover supports both.
+> - **Docker is installed**; see [A-testing-status.md](A-testing-status.md) for results and [A-handoff-for-integration.md](A-handoff-for-integration.md) for the merge guide.
 
 ---
 

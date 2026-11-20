@@ -158,11 +158,22 @@ def test_unknown_queue(make):
 
 
 def test_unsupported_features(make):
+    """No **kwargs: unsupported SQS arguments fail loudly (and C's rule 7 can see the signature)."""
     c, url, _ = make()
-    with pytest.raises(q.UnsupportedFeature):
+    with pytest.raises(TypeError):
         c.send_message(QueueUrl=url, MessageBody="x", DelaySeconds=5)
-    with pytest.raises(q.UnsupportedFeature):
+    with pytest.raises(TypeError):
         c.send_message(QueueUrl=url, MessageBody="x", MessageGroupId="g")
+    with pytest.raises(TypeError):
+        c.receive_message(QueueUrl=url, AttributeNames=["All"])
+
+
+def test_signatures_are_explicit_for_rule_7():
+    import inspect
+    for name in ("get_queue_url", "send_message", "receive_message", "delete_message"):
+        params = inspect.signature(getattr(q.Queue, name)).parameters.values()
+        assert all(p.kind not in (p.VAR_KEYWORD, p.VAR_POSITIONAL) for p in params), name
+    assert list(inspect.signature(q.Queue.send_message).parameters) == ["self", "QueueUrl", "MessageBody"]
 
 
 def test_declare_rejects_mismatched_arguments(make):

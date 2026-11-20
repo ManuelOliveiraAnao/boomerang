@@ -10,8 +10,11 @@ Semantics:
   them when the connection closes.
 - Dead-letter queue: quorum queue `x-delivery-limit` + dead-letter routing to "<name>-dlq".
 
-Honest limits (raise UnsupportedFeature or are not emulated): FIFO queues, DelaySeconds,
-message attributes, ChangeMessageVisibility, purge; expiry only happens when the client is called.
+Signatures are explicit on purpose (no **kwargs): C's rules check (rule 7, docs/15 L14) reads them with
+inspect.signature to reject AI-written calls that use arguments the adapter doesn't support. Unsupported
+SQS features (DelaySeconds, MessageAttributes, MessageGroupId, deduplication, AttributeNames,
+ChangeMessageVisibility, FIFO) are therefore rejected at rewrite time, or raise TypeError if called anyway.
+Expiry only happens when the client is called again.
 """
 from __future__ import annotations
 
@@ -28,8 +31,6 @@ from pika.exceptions import (AMQPConnectionError, ChannelClosed, ChannelClosedBy
 
 DEFAULT_VISIBILITY_S = 30
 POLL_INTERVAL_S = 0.1
-_UNSUPPORTED_SEND = ("DelaySeconds", "MessageAttributes", "MessageGroupId", "MessageDeduplicationId",
-                     "MessageSystemAttributes")
 _RECONNECT_ERRORS = (AMQPConnectionError, StreamLostError, ChannelClosed, ChannelWrongStateError)
 
 
@@ -123,7 +124,7 @@ class Queue:
                 self._inflight.clear()
 
     # ---------------------------------------------------------------- SQS API
-    def get_queue_url(self, QueueName: str, **_: Any) -> dict:
+    def get_queue_url(self, QueueName: str) -> dict:
         def body(ch):
             ch.queue_declare(queue=QueueName, passive=True)
             return {"QueueUrl": f"amqp:///{QueueName}"}
@@ -134,10 +135,7 @@ class Queue:
                 raise QueueDoesNotExist(QueueName) from e
             raise
 
-    def send_message(self, QueueUrl: str, MessageBody: str, **kwargs: Any) -> dict:
-        unsupported = [k for k in kwargs if k in _UNSUPPORTED_SEND]
-        if unsupported:
-            raise UnsupportedFeature(f"send_message({', '.join(unsupported)}) is not supported")
+    def send_message(self, QueueUrl: str, MessageBody: str) -> dict:
         message_id = uuid.uuid4().hex
         name = _name_from_url(QueueUrl)
 
@@ -152,8 +150,7 @@ class Queue:
         return {"MessageId": message_id, "MD5OfMessageBody": _md5(MessageBody)}
 
     def receive_message(self, QueueUrl: str, MaxNumberOfMessages: int = 1, WaitTimeSeconds: int = 0,
-                        VisibilityTimeout: int | None = None, **kwargs: Any) -> dict:
-        # MessageAttributeNames / AttributeNames are accepted and ignored: attributes are not stored.
+                        VisibilityTimeout: int | None = None) -> dict:
         name = _name_from_url(QueueUrl)
         visibility = DEFAULT_VISIBILITY_S if VisibilityTimeout is None else VisibilityTimeout
         deadline = time.monotonic() + max(WaitTimeSeconds, 0)
@@ -184,7 +181,7 @@ class Queue:
             time.sleep(POLL_INTERVAL_S)
         return {"Messages": messages} if messages else {}
 
-    def delete_message(self, QueueUrl: str, ReceiptHandle: str, **_: Any) -> dict:
+    def delete_message(self, QueueUrl: str, ReceiptHandle: str) -> dict:
         with self._lock:
             entry = self._inflight.pop(ReceiptHandle, None)
             if entry is None or not ReceiptHandle.startswith(f"{self._epoch}:"):

@@ -134,6 +134,23 @@ sends exactly `docker compose … restart postgres`.
 **Done when:** `collect()` on a stack with Postgres stopped returns a failing `container` signal for `postgres`,
 failing `probe` and `health` signals, and `api` logs that contain "connection refused".
 
+> **Status: done** on branch `doctor-a` (20 Nov, 14:50). `boomerang/doctor/signals.py`, `boomerang/doctor/actions.py`,
+> `tests/test_doctor_signals.py` (20 tests). Differences from the plan above, for pieces 2 and 3:
+> - `actions.apply(..., ready_timeout_s=60)`: after a restart or start, `ok` means the container is **running and
+>   healthy**, not just started (real Docker shows "health: starting" for a few seconds). `detail` says
+>   "postgres healthy after 2 s", or "not healthy after 60 s".
+> - `signals.collect(leaseweb_dir, run, health_url, *, connect=, fetch=)`: sockets and HTTP are injectable for tests.
+>   A service compose doesn't list at all is a failing `container` signal with `detail="not created"`; no Docker at
+>   all is one signal for service `"stack"`.
+> - Queue signals skip dead-letter queues (messages waiting there are expected) and are left out silently when the
+>   management API isn't reachable.
+> - `break_service()` refuses a remote `DOCKER_HOST` (ssh:// or tcp://), not only another compose project.
+> - The §2 contract is in `models.py` on this branch, field for field, so piece 1 could be built first. C can keep it.
+>
+> **Checked on real Docker** (a two-container `bmr-verify` stack): healthy → `break_service(postgres)` → container
+> "Exited (0)", port 5432 "connection refused", Postgres's "database system is shut down" in the logs →
+> `apply(restart_service postgres)` → "postgres healthy after 2 s". The full ShopLite stack wasn't booted here.
+
 ---
 
 ## 4. Piece 2 · Diagnosis rules: B (Francisco)

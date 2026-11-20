@@ -58,6 +58,7 @@ Emitting: A's modules call `emit.emit(stage, message, level, **data)` (C's `Emit
 
 Following C's convention, a bare `pytest` never needs Docker or a model:
 - `pytest` → unit tests. **189 passed in ~35 s** on this branch (before B/C3 are merged).
+- `pytest -m integration` → **57 passed, 0 failed** (~3 min) on this branch.
 - Integration: `boomerang lab up`, then `python -c "from boomerang import lab; lab.up(adapters=True)"` (adds test Postgres on `127.0.0.1:55432` and RabbitMQ on `127.0.0.1:55672`), then `pytest -m integration`. Marked `integration`: lab, provisioner, ShopLite, data mover (moto), the real-RabbitMQ variant of the queue tests, the real stack boot.
 - B's kv tests need `DATABASE_URL=postgresql://test:test@127.0.0.1:55432/test`; they passed 14/14 on real Postgres.
 - Docker on Windows: add `C:\Program Files\Docker\Docker\resources\bin` to PATH in Git Bash if `docker` isn't found.
@@ -73,7 +74,7 @@ Following C's convention, a bare `pytest` never needs Docker or a model:
 
 | # | Gap | Why / what is needed |
 |---|---|---|
-| G1 | **The integration run of this exact commit** (adapted API) was still running when this was pushed. Unit tests are green. | Run `pytest -m integration` after the merge. |
+| G1 | ~~Integration run of the adapted API~~ **Done: `pytest -m integration` → 57 passed, 0 failed** (moto, real RabbitMQ, real Postgres, real stack boot), plus `pytest` → 189 passed. | Re-run both after the A+B+C merge. |
 | G2 | **Full `verify()` on B's real generated stack** with C's de-locked ShopLite (boot of `api`/`worker` images, schema, 7/7, health). | Needs B6 + C3 output in `runs/<id>/leaseweb/`; first `api` build needs network (pip). |
 | G3 | **`reset_data()` has no automated test yet**, and has never run against a real stack. | Needs a booted generated stack; test after G2. |
 | G4 | **Data mover against the real Leaseweb side** (B's kv on Postgres, RabbitMQ, SeaweedFS). Tested only with fake AWS on both sides (same boto3-shaped interface) and with fakes. | Needs G2. |

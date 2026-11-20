@@ -1,0 +1,19 @@
+[browser]
+# No telemetry: the sovereignty story starts with our own tools.
+gatherUsageStats = false
+
+[server]
+headless = true
+runOnSave = true
+
+[theme]
+base = "dark"
+# Leaseweb-style red, used sparingly (primary buttons, focus).
+primaryColor = "#E3001B"
+backgroundColor = "#0B0D10"
+secondaryBackgroundColor = "#15181D"
+textColor = "#E6E8EB"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"

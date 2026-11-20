@@ -4,7 +4,7 @@ You have **6 hours**. Read this page (5 min), then your role's docs (15 min), th
 
 ## The one-paragraph version
 
-Boomerang scans an AWS app (code **and** Terraform), labels every service and feature 🟢 config only / 🟠 adapter with listed changes / 🔴 needs a human, and, after a human approves, uses a **local AI model** to move the code onto small, pre-tested adapters. It generates **ready-to-use Leaseweb files**, boots them on the laptop, runs the app's **original** tests, moves the data with matching counts, then goes **back to AWS** (original code + data copied back) and shows **what got lost**. Costs come from a **real price table**, with self-hosting effort included.
+Boomerang scans an AWS app (code **and** Terraform), labels every service and feature 🟢 config only / 🟠 adapter with listed changes / 🔴 needs a human, and, after a human approves, uses a **local AI model** to move the code onto small, pre-tested adapters. It generates **ready-to-use self-hosted files** (they run on any server with Docker; Leaseweb is our example), boots them on the laptop, runs the app's **original** tests, moves the data with matching counts, then goes **back to AWS** (original code + data copied back) and shows **what got lost**. Costs come from a **real price table**, with self-hosting effort included.
 
 **What changed from v1 and why:** [11 Decisions](11-decisions.md), last section.
 

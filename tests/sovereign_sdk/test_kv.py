@@ -89,3 +89,43 @@ def test_condition_is_enforced(table):
 def test_unsupported_expression(table):
     with pytest.raises(UnsupportedFeature):
         table.put_item({"order_id": "order-1"}, ConditionExpression="begins_with(order_id, 'a')")
+
+
+def test_attribute_exists_condition(table):
+    table.put_item({"order_id": "order-1"})
+    table.put_item(
+        {"order_id": "order-1", "status": "processed"},
+        ConditionExpression="attribute_exists(order_id)",
+    )
+    assert table.get_item({"order_id": "order-1"})["Item"]["status"] == "processed"
+
+
+def test_sort_key_round_trip(table):
+    kv = table.connection
+    table_name = "events_test"
+    kv.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+    component = {
+        "id": "events",
+        "resource_name": table_name,
+        "partition_key": {"name": "account_id", "type": "S"},
+        "sort_key": {"name": "event_id", "type": "S"},
+        "indexes": [],
+    }
+    kv.execute(ddl(component))
+    kv.commit()
+    sort_table = __import__("sovereign_sdk.kv", fromlist=["Table"]).Table(kv, table_name)
+
+    sort_table.put_item(
+        {"account_id": "account-1", "event_id": "event-1", "message": "created"}
+    )
+    item = sort_table.get_item(
+        {"account_id": "account-1", "event_id": "event-1"}
+    )
+    assert item["Item"]["message"] == "created"
+
+    sort_table.delete_item({"account_id": "account-1", "event_id": "event-1"})
+    assert sort_table.get_item(
+        {"account_id": "account-1", "event_id": "event-1"}
+    ) == {}
+    kv.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+    kv.commit()

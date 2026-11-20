@@ -42,3 +42,74 @@ def test_static_scanner_finds_boto3_calls(tmp_path):
     usage = components["orders"]["usages"][0]
     assert usage["symbol"] == "put_order"
     assert usage["operation"] == "put_item"
+
+
+def test_static_scanner_finds_s3_sqs_lambda_iam_and_alarm(tmp_path):
+    app = tmp_path / "ShopLite"
+    app.mkdir()
+    (app / "main.tf").write_text(
+        'resource "aws_s3_bucket" "receipts" {}\n'
+        'resource "aws_sqs_queue" "order_events" {\n'
+        '  visibility_timeout_seconds = 30\n'
+        '  redrive_policy = "{}"\n'
+        '}\n'
+        'resource "aws_lambda_function" "thumbnailer" {}\n'
+        'resource "aws_iam_role" "shoplite_task" {}\n'
+        'resource "aws_cloudwatch_metric_alarm" "dlq_not_empty" {}\n',
+        encoding="utf-8",
+    )
+
+    pam = scan_static(app)
+    components = {component["id"]: component for component in pam["components"]}
+
+    assert components["receipts"]["kind"] == "object_store"
+    assert components["order_events"]["kind"] == "queue"
+    assert {"visibility_timeout", "dlq"}.issubset(
+        set(components["order_events"]["features"])
+    )
+    assert components["thumbnailer"]["kind"] == "function"
+    assert components["shoplite_task"]["kind"] == "identity"
+    assert components["dlq_not_empty"]["kind"] == "monitoring"
+
+
+def test_assessment_and_lost_report_cover_unmigrated_features():
+    pam = {
+        "components": [
+            {
+                "id": "receipts",
+                "kind": "object_store",
+                "provider": "aws.s3",
+                "features": ["event_notification"],
+                "usages": [],
+            },
+            {
+                "id": "thumbnailer",
+                "kind": "function",
+                "provider": "aws.lambda",
+                "features": ["event_notification"],
+                "usages": [],
+            },
+        ]
+    }
+
+    assessment = assess(pam)
+    lights = {(finding["component_id"], finding["light"]) for finding in assessment["findings"]}
+
+    assert ("receipts", "red") in lights
+    assert ("thumbnailer", "red") in lights
+    lost = build(pam, assessment)
+    assert all(item["status"] == "lost" for item in lost)
+
+
+def test_lockin_score_weights_components_and_usage():
+    pam = {
+        "components": [
+            {
+                "provider": "aws.dynamodb",
+                "usages": [{"operation": "put_item"}, {"operation": "get_item"}],
+            },
+            {"provider": "aws.s3", "usages": [{"operation": "put_object"}]},
+        ]
+    }
+
+    assert score(pam) == 90 * 2 + 35

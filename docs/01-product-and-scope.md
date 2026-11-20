@@ -1,75 +1,82 @@
-# 01 · Product & scope
+# 01 · Product & scope (v2)
 
 ## 1. Problem
 
-Companies run on AWS, Azure and GCP, and many want to move some workloads off them because of cost, data sovereignty, or concentration risk. Moving is hard because:
+Companies want to move workloads off AWS to European providers like Leaseweb (cost, data sovereignty, concentration risk), but:
 
-1. **Code lock-in:** application code calls proprietary APIs (DynamoDB, SQS). Leaving looks like a rewrite.
-2. **No trustworthy tooling:** hyperscalers' AI migration agents (AWS Transform, Azure Copilot Migration Agent) only move workloads **into** their cloud. Generic coding agents rewrite files but don't map services, generate the target infrastructure, or prove the result works.
-3. **Fear of one-way doors:** a migration feels irreversible, so teams don't start.
+1. **Code lock-in:** the app calls proprietary APIs (DynamoDB, SQS). Leaving looks like a rewrite.
+2. **Unknown blast radius:** nobody can say up front what breaks and what gets lost.
+3. **No trustworthy tooling:** hyperscaler AI migration agents only move workloads **in**. Generic coding agents rewrite files but don't generate the target setup, move the data, or prove anything.
+4. **Fear of one-way doors:** if it goes wrong, can we go back?
+5. **Fuzzy economics:** "self-hosting is cheaper" is often claimed and rarely calculated honestly.
 
-Evidence: 37signals left AWS by hand and reported saving millions per year. The repatriation trend is growing, but the work is still manual.
+## 2. Solution: Boomerang
 
-## 2. Solution
+An AI-assisted migration tool from AWS to Leaseweb and back, that **shows what breaks, does the move, proves it, and prices it honestly**.
 
-**Boomerang** is a two-way migration engine built on one idea: describe the app in a **platform-neutral model (PAM)**, then generate any target from it.
+| Step | What the user sees |
+|---|---|
+| **Scan** | Every place the code and infrastructure depend on AWS, file and line |
+| **Traffic lights** | Each service and feature labeled 🟢 config only · 🟠 adapter, behavior differences listed · 🔴 not migrated, needs a human |
+| **De-lock** | AI maps the app's AWS calls onto small, pre-tested adapters (`sovereign_sdk`); S3 is a config change only. Human approves the plan first. |
+| **Leaseweb files** | Ready-to-use `docker-compose.yml`, `.env` template, `cloud-init.yaml`, `deploy.sh`, backup job, and a deploy README |
+| **Verify live** | Files are valid → the new setup boots on the laptop → the app's **original** tests pass → health check → ✅ |
+| **Move data** | Items, objects and pending messages copied; counts and checksums compared |
+| **Round trip** | Back to AWS: original code + data copied back (including data written on Leaseweb), tests again, **report of what got lost** |
+| **Costs** | Real published prices, editable usage, self-hosting ops cost included, egress €0 for switching from 12 Jan 2027 (EU Data Act) |
 
-```
-AWS app ──scan──►               ──generate──► local (Docker Compose)
-                  Portable App
-local app ─scan──►    Model      ──generate──► AWS (Terraform)
-```
+**Principles**
+- AI only where it reads unseen code or explains; everything else is plain, deterministic code.
+- The app's existing tests are the spec. The AI never writes or edits tests.
+- AWS stays untouched until all checks pass.
+- We flag what we don't support. We never fake it.
 
-- **AI** does what needs understanding: reading code, rewriting API calls, fixing failures.
-- **Deterministic code** does what must be exactly right: infrastructure templates, provisioning, running tests.
-- **Tests are the spec.** The app's original test suite must pass on the new platform. The AI may never edit tests.
+## 3. Positioning
 
-## 3. Positioning (for judges)
-
-| | Hyperscaler agents | Code-upgrade tools | Generic coding agents | **Boomerang** |
+| | Hyperscaler agents | Terraform / Kubernetes | Generic coding agents | **Boomerang** |
 |---|---|---|---|---|
-| Direction | Into their cloud | Within one stack | Any | **Out, in, and round trip** |
-| Proprietary service → open-source equivalent | ✗ | Partial | Manual | **✓ core** |
-| Generates target infrastructure | Their own | ✗ | Manual | **✓** |
-| Proves the result works | Partial | Tests only | Manual | **✓ provision + test + auto-fix** |
-| Lock-in score | ✗ | ✗ | ✗ | **✓** |
-
-One-liner: **"No one-way doors. Boomerang makes cloud moves reversible and verified."**
+| Direction | Into their cloud | n/a | Any | **AWS → Leaseweb → back** |
+| Removes AWS from the code | ✗ | ✗ (infra only) | Manual | **✓** |
+| Says what breaks, per service | Partial | ✗ | ✗ | **✓ traffic lights** |
+| Generates target setup | Their own | You write it | Manual | **✓ Leaseweb files** |
+| Moves data + checks counts | Their tools | ✗ | ✗ | **✓** |
+| Proves it works | Partial | ✗ | Manual | **✓ boot + original tests** |
+| Honest cost comparison | Their pricing | ✗ | ✗ | **✓ real prices + ops cost** |
 
 ## 4. Scope
 
-### In scope (MVP, must work at T+5:00)
+### In scope (must work at T+4:30)
+- Python apps (FastAPI + boto3), one sample app: **ShopLite**.
+- S3 → S3-compatible (SeaweedFS locally; Leaseweb Object Storage in production), **🟢 config only**.
+- DynamoDB → Postgres via `sovereign_sdk.kv`, **🟠**.
+- SQS → RabbitMQ via `sovereign_sdk.queue` (ack, retries, visibility timeout, DLQ), **🟠**.
+- Detected but not migrated: Lambda triggers, IAM roles, CloudWatch alarms, **🔴 manual review**.
+- Leaseweb output files; live verification on the laptop.
+- Data migration both ways with counts/checksums.
+- Round trip with "what got lost" report.
+- Cost model with a sourced price table.
+- Streamlit UI + CLI; local LLM via Ollama (Claude fallback).
 
-- Python apps only (FastAPI + boto3 style).
-- Three service pairs, both directions:
-  - S3 ⇄ MinIO (config-level change)
-  - DynamoDB ⇄ Postgres (real rewrite: data model + queries)
-  - SQS ⇄ Redis (real rewrite + semantic difference flagged)
-- One sample app, **ShopLite**, in two flavors (AWS and local).
-- Pipeline: scan → plan → rewrite → generate → validate → fix loop → report.
-- Round trip AWS → local → AWS.
-- Lock-in score before/after.
-- Streamlit UI, plus a CLI.
-- LLM record/replay cache, so the demo is fast and repeatable.
+### Stretch
+| ID | Stretch |
+|---|---|
+| S1 | Terraform for Leaseweb Public Cloud (official provider) to create the server |
+| S2 | `deploy.sh` run against a real Leaseweb server (if organizers give access), recorded before the demo |
+| S3 | Scoped S3 credentials in SeaweedFS (per-bucket identity) shown in the UI |
+| S4 | Migrate any local path, not only the sample app |
 
-### Stretch (only if a checkpoint is green early)
+### Out of scope (say "roadmap")
+AI SRE / self-healing ops agent, ScyllaDB Alternator path, Lambda/IAM migration, other languages, zero-downtime cut-over, Kubernetes.
 
-| ID | Stretch | Value |
-|---|---|---|
-| S1 | Data migration: copy DynamoDB items → Postgres rows, S3 objects → MinIO | "It moved my data too" |
-| S2 | Boot the generated `docker-compose.yml` itself during validation (offset ports) | Stronger proof |
-| S3 | `terraform validate` on generated Terraform | Proof for the AWS side |
-| S4 | Cost comparison panel with stated assumptions | Business story |
-| S5 | Start a migration from any local path, not only the sample app | Generality |
+## 5. What we never claim
+- Zero downtime. Full compatibility. "Migrates any app."
+- That passing tests prove everything: they prove what the tests cover.
+- That leaving AWS is automatically cheaper: the cost view includes backups, monitoring and staff time.
 
-### Out of scope (say "roadmap" if asked)
-
-Real AWS accounts, Lambda/IAM/VPC migration, languages other than Python, Kubernetes targets, multi-user auth, the "AI ops agent" that runs the infrastructure after migration (see [10](10-risks-and-future.md)).
-
-## 5. Success criteria for the demo
-
-1. `boomerang roundtrip sample-app/aws` completes with **all tests green on all three stages** (original, local, back on AWS).
-2. Lock-in score visibly drops (≈70 → ≈8) and returns.
-3. At least one **real** fix-loop iteration is shown (the AI fixes its own failing test), from a live run or a recorded one.
-4. The UI tells the story in under 3 minutes.
-5. A backup video exists by T+5:30.
+## 6. Success criteria for the demo
+1. Scan shows ShopLite's AWS dependencies with **2 🟠, 1 🟢, at least 1 🔴**.
+2. Generated Leaseweb setup **boots on the laptop**, original tests **7/7**, health ✅.
+3. Data moved with **matching counts and checksums**.
+4. Round trip back to AWS: tests green, counts match (including an order created on Leaseweb), **"what got lost" list shown**.
+5. Cost view with sources, editable usage, ops cost and egress line.
+6. Backup video by T+5:30.

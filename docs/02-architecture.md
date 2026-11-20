@@ -1,386 +1,332 @@
-# 02 · Architecture
+# 02 · Architecture (v2)
 
 ## 1. System overview
 
 ```mermaid
 flowchart LR
-    subgraph Input
-      SRC[App source<br/>code + Terraform/SQL]
-    end
+    SRC[AWS app<br/>code + Terraform + Dockerfile + .env.example] --> SC
     subgraph Engine["boomerang (Python package)"]
       SC[Scanner<br/>static + AI] --> PAM[(Portable App Model)]
-      PAM --> LK[Lock-in score]
-      PAM --> PL[Planner<br/>mappings + AI notes]
-      PL --> RW[Rewriter<br/>AI, per file]
-      PL --> GEN[Generators<br/>Jinja templates]
-      RW --> VAL[Validator<br/>provision + pytest]
-      GEN --> VAL
-      VAL -- failures --> FX[Fixer<br/>AI] --> VAL
-      VAL --> REP[Report]
+      PAM --> TL[Traffic lights<br/>rules + AI notes]
+      TL --> GATE{Human approves plan}
+      GATE --> DL[De-lock<br/>AI maps calls → sovereign_sdk]
+      GATE --> GEN[Leaseweb files<br/>templates]
+      DL --> VER[Verify live<br/>config check · boot · original tests · health]
+      GEN --> VER
+      VER -- failures --> FX[Fixer AI] --> VER
+      VER --> DATA[Data mover<br/>copy + counts + checksums]
+      DATA --> RT[Round trip<br/>rollback + data back + lost report]
+      RT --> REP[Report + costs]
     end
-    subgraph Lab["Lab (Docker Compose)"]
-      MOTO[moto: fake AWS<br/>S3 · DynamoDB · SQS]
-      PG[Postgres]
-      MINIO[MinIO]
-      REDIS[Redis]
-    end
-    SRC --> SC
-    VAL --> Lab
-    LLM[[Claude API<br/>via llm.py + cache]] -.-> SC & PL & RW & FX
+    LLM[[Ollama local model<br/>via llm.py + cache]] -.-> SC & TL & DL & FX
     UI[Streamlit UI] --> Engine
     CLI[Typer CLI] --> Engine
+    VER --> LW[(Leaseweb stack on laptop<br/>Postgres · RabbitMQ · SeaweedFS · api · worker)]
+    DATA --> MOTO[(moto: fake AWS)]
+    DATA --> LW
 ```
 
-**Key decisions**
+## 2. Key decisions
 
 | # | Decision | Why |
 |---|---|---|
-| D1 | One Python package, called directly by both CLI and UI (no HTTP API between them) | Removes a whole integration layer; 6 hours |
-| D2 | Platform-neutral **PAM** in the middle | Both directions share one engine; new targets = new generator |
-| D3 | AI for code, **templates for infrastructure** | Infra must be exactly right and match the conventions the AI follows |
-| D4 | **Mapping conventions** are one text source used by both the rewriter prompt and the generators | Guarantees the code and the schema agree |
-| D5 | Original tests are the spec; AI can never edit `tests/` | Credible proof of correctness |
-| D6 | AWS emulated by **moto** in Docker | No AWS account, no cost, works offline-ish |
-| D7 | LLM record/replay cache | Fast, deterministic demo; cheap re-runs |
-| D8 | Validation runs against the shared lab, with per-run resource names | Fast (seconds) and isolated |
-| D9 | Streamlit for UI | Fastest path to a good-looking dashboard in Python |
-| D10 | Every stage emits **events**, written to `events.jsonl` | Live progress in UI, and replay of recorded runs |
-
-## 2. Pipeline sequence (one leg)
-
-```mermaid
-sequenceDiagram
-    participant P as pipeline.migrate()
-    participant S as scanner
-    participant PL as planner
-    participant R as rewriter
-    participant G as generators
-    participant V as validator
-    participant F as fixer
-    P->>S: scan(app_dir, platform)
-    S-->>P: AppModel (PAM)
-    P->>PL: plan(pam, target)
-    PL-->>P: MigrationPlan
-    P->>P: copy app to runs/<id>/app (tests included)
-    par per affected file
-      P->>R: rewrite(file, pam, plan)
-      R-->>P: RewriteResult
-    end
-    P->>G: render(pam, target)
-    G-->>P: infra files (+ .env, requirements.txt)
-    loop attempt 1..3
-      P->>V: validate(app_dir, pam, target)
-      V-->>P: TestReport
-      alt all passed
-        P->>P: stop
-      else failures
-        P->>F: fix(report, files, plan)
-        F-->>P: FileEdits (never tests/)
-      end
-    end
-    P->>P: write report.md, run.json
-```
-
-Round trip = `migrate(aws → local)` then `migrate(<leg1 output> → aws)`. Leg 2 **re-scans** the generated local app, which also proves the scanner understands local code.
+| D1 | One Python package used by CLI and UI directly | No API layer to build |
+| D2 | Platform-neutral **PAM** in the middle | Scanner, classifier, generators and reports share one model |
+| D3 | **Adapters, not AI-invented SQL/AMQP.** `sovereign_sdk.kv` and `.queue` mimic boto3 signatures and are tested by us | Small models stay reliable; semantics are handled in code we can test |
+| D4 | AI works **per function**, not per file (Python `ast` slicing + stitching) | Small prompts → fast and accurate on a 7B model |
+| D5 | Templates for all infrastructure files | Must be exactly right |
+| D6 | Original tests are the spec; AI can never touch `tests/` | Credible proof |
+| D7 | **AWS untouched until checks pass**; the original code is kept as-is | Safe rollback = redeploy original + copy data back |
+| D8 | Moto for AWS; the **generated** Leaseweb compose itself is booted for verification | We verify the real deliverable, not a stand-in |
+| D9 | Local LLM (Ollama), single model, `keep_alive=60m`; Claude fallback by env | Sovereignty story; no model-swap freezes |
+| D10 | Every LLM schema puts a reasoning field **first** | Small models decide better after writing a diagnosis |
+| D11 | Rules check after every LLM output (paths, compile, forbidden calls) | Valid JSON ≠ correct action |
+| D12 | Events for every stage → `events.jsonl` | Live UI + offline replay |
 
 ## 3. The contract: `boomerang/models.py`
 
-This file is written by the tech lead in the first 30 minutes, exactly as below. Everyone codes against it. **The LLM-facing models avoid `dict` fields and unions on purpose**: they are passed to Claude's structured outputs, which work best with flat objects and lists.
+Tech lead writes this in the first 30 minutes. LLM-facing models use only flat objects and lists (no dicts/unions), with the reasoning field first.
 
 ```python
-# boomerang/models.py
 from __future__ import annotations
 from typing import Literal, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-Platform = Literal["aws", "local"]
-Kind = Literal["object_store", "kv_table", "queue"]
-Provider = Literal["aws.s3", "aws.dynamodb", "aws.sqs",
-                   "local.minio", "local.postgres", "local.redis"]
+Platform = Literal["aws", "leaseweb"]
+Light = Literal["green", "amber", "red"]
+Kind = Literal["object_store", "kv_table", "queue", "function", "trigger", "identity", "monitoring", "other"]
+Provider = Literal[
+    "aws.s3", "aws.dynamodb", "aws.sqs", "aws.lambda", "aws.iam", "aws.cloudwatch", "aws.other",
+    "lw.object_storage",   # SeaweedFS on the server, or Leaseweb Object Storage
+    "lw.postgres", "lw.rabbitmq", "none",
+]
 
-# ---------- Portable App Model (LLM-facing: scanner output) ----------
+# ---------- PAM (scanner output, LLM-facing) ----------
 class EnvVar(BaseModel):
-    name: str                     # "ORDERS_TABLE"
-    value: str                    # dev/default value, "orders"
-    purpose: str                  # "physical name of orders table"
+    name: str; value: str; purpose: str
 
 class KeyAttr(BaseModel):
-    name: str                     # "order_id"
-    type: Literal["S", "N"] = "S"
+    name: str; type: Literal["S", "N"] = "S"
 
 class Index(BaseModel):
-    name: str                     # "customer_id-index"
-    partition_key: KeyAttr
-    sort_key: KeyAttr | None = None
+    name: str; partition_key: KeyAttr; sort_key: KeyAttr | None = None
 
 class CodeRef(BaseModel):
-    file: str                     # relative to app root, "app/db.py"
-    line: int                     # 1-based
-    operation: str                # "put_item", "query", "send_message", "rpush", "execute"...
-    snippet: str                  # the source line, stripped
+    file: str                    # "app/db.py" or "infra/main.tf"
+    line: int
+    symbol: str | None = None    # enclosing function, e.g. "get_order"
+    operation: str               # "put_item", "send_message", "aws_lambda_permission"...
+    snippet: str
 
 class Component(BaseModel):
-    id: str                       # stable logical id: "orders", "receipts", "order_events"
+    id: str                      # "orders", "receipts", "order_events", "receipt_thumbnailer"
     kind: Kind
-    provider: Provider            # current binding
-    resource_name: str            # dev physical name: "orders"
-    name_env_var: str | None = None   # env var holding the name: "ORDERS_TABLE"
-    # kv_table only
-    partition_key: KeyAttr | None = None
+    provider: Provider
+    resource_name: str
+    name_env_var: str | None = None
+    partition_key: KeyAttr | None = None      # kv_table
     sort_key: KeyAttr | None = None
     indexes: list[Index] = []
-    # queue only
-    fifo: bool = False
+    fifo: bool = False                        # queue
+    max_receive_count: int | None = None      # queue DLQ redrive
+    visibility_timeout_s: int | None = None
+    features: list[str] = []     # used features: "conditional_write", "gsi", "dlq", "event_notification", "ttl", ...
     usages: list[CodeRef] = []
-    notes: list[str] = []         # semantics that may break: "relies on visibility timeout"
 
 class FileInfo(BaseModel):
     path: str
     role: Literal["app", "infra", "test", "config", "other"]
     component_ids: list[str] = []
 
-class AppModel(BaseModel):        # a.k.a. PAM
-    pam_version: Literal["0.1"] = "0.1"
+class AppModel(BaseModel):       # PAM
+    pam_version: Literal["0.2"] = "0.2"
     app_name: str
     platform: Platform
-    language: Literal["python"] = "python"
-    framework: str = "fastapi"
-    entrypoints: list[str]        # ["app.main:app", "app.worker:main"]
+    entrypoints: list[str]
     test_command: str = "pytest -q tests"
     components: list[Component]
     files: list[FileInfo]
     env: list[EnvVar]
-    notes: list[str] = []
 
-# ---------- Plan ----------
-Strategy = Literal["config", "rewrite"]
-Risk = Literal["low", "medium", "high"]
-
-class PlanStep(BaseModel):
+# ---------- Traffic lights ----------
+class Finding(BaseModel):
+    analysis: str                # reasoning first
     component_id: str
-    from_provider: Provider
-    to_provider: Provider
-    strategy: Strategy
-    files: list[str]              # app files to rewrite for this component
-    risk: Risk
-    notes: list[str] = []         # semantic differences, written by the AI
+    feature: str                 # "basic object ops", "conditional_write", "dlq", "event_notification"...
+    light: Light
+    what_changes: str            # one sentence, user-facing
+    evidence: list[CodeRef] = []
 
-class MigrationPlan(BaseModel):
-    source: Platform
-    target: Platform
-    steps: list[PlanStep]
-    files_to_rewrite: list[str]
-    lock_in_before: int
-    lock_in_after: int
-    summary: str                  # 2-4 sentences, AI-written
-    warnings: list[str] = []
-
-# ---------- Rewrite / fix (LLM-facing) ----------
-class RewriteResult(BaseModel):
-    path: str
-    new_content: str              # the complete file
+class Assessment(BaseModel):
+    findings: list[Finding]
+    overall: Light               # worst light that is migrated; reds are listed separately
     summary: str
-    changes: list[str] = []
 
-class FileEdit(BaseModel):
-    path: str
-    new_content: str
-    reason: str
+# ---------- De-lock (LLM-facing, per function) ----------
+class FunctionRewrite(BaseModel):
+    analysis: str                # what the function does and which calls must change
+    new_source: str              # the complete function (def ... ) only
+    unsupported: list[str] = []  # features the adapter can't do → become red/amber findings
 
 class FixResult(BaseModel):
-    diagnosis: str                # what went wrong, 1-3 sentences
-    edits: list[FileEdit]
+    root_cause_analysis: str
+    file: str
+    function: str
+    new_source: str
 
-# ---------- Validation ----------
+# ---------- Verification ----------
+class Check(BaseModel):
+    name: str                    # "compose config", "boot", "tests", "health", "schema"
+    ok: bool
+    detail: str = ""
+    duration_s: float = 0
+
 class TestFailure(BaseModel):
-    test: str                     # "tests/test_orders.py::test_create_order"
-    message: str
-    traceback: str                # trimmed to ~60 lines
+    test: str; message: str; traceback: str
 
 class TestReport(BaseModel):
-    attempt: int
-    platform: Platform
-    passed: int
-    failed: int
-    errors: int
-    total: int
-    duration_s: float
+    attempt: int; platform: Platform
+    passed: int; failed: int; errors: int; total: int; duration_s: float
     failures: list[TestFailure] = []
-    output_tail: str = ""         # last ~80 lines of pytest output
-
+    output_tail: str = ""
     @property
-    def ok(self) -> bool:
-        return self.total > 0 and self.failed == 0 and self.errors == 0
+    def ok(self) -> bool: return self.total > 0 and self.failed == 0 and self.errors == 0
+
+class Verification(BaseModel):
+    checks: list[Check]
+    tests: TestReport | None = None
+    @property
+    def ok(self) -> bool: return all(c.ok for c in self.checks) and bool(self.tests and self.tests.ok)
+
+# ---------- Data ----------
+class DataCount(BaseModel):
+    component_id: str
+    kind: Kind
+    source_count: int
+    target_count: int
+    checksum_match: bool | None = None
+    notes: list[str] = []
+
+class DataMove(BaseModel):
+    direction: Literal["aws->leaseweb", "leaseweb->aws"]
+    counts: list[DataCount]
+    @property
+    def ok(self) -> bool: return all(c.source_count == c.target_count and c.checksum_match is not False for c in self.counts)
+
+class LostItem(BaseModel):
+    component_id: str
+    feature: str
+    status: Literal["preserved", "changed", "lost"]
+    detail: str
 
 # ---------- Events & runs ----------
-Stage = Literal["scan", "plan", "rewrite", "generate", "provision",
-                "validate", "fix", "report", "roundtrip"]
+Stage = Literal["scan", "assess", "approve", "delock", "generate", "verify", "fix", "data", "rollback", "report", "cost"]
 
 class Event(BaseModel):
-    ts: float
-    run_id: str
-    stage: Stage
+    ts: float; run_id: str; stage: Stage
     level: Literal["info", "success", "warning", "error"] = "info"
     message: str
-    data: dict[str, Any] | None = None   # not LLM-facing, dicts are fine
+    data: dict[str, Any] | None = None
 
 class RunSummary(BaseModel):
-    run_id: str
-    source_dir: str
-    source: Platform
-    target: Platform
-    status: Literal["running", "passed", "failed", "error"]
-    started_at: float
-    finished_at: float | None = None
-    lock_in_before: int | None = None
-    lock_in_after: int | None = None
-    attempts: list[TestReport] = []
-    files_rewritten: list[str] = []
+    run_id: str; source_dir: str
+    status: Literal["running", "awaiting_approval", "passed", "failed", "error"]
+    started_at: float; finished_at: float | None = None
+    lock_in_before: int | None = None; lock_in_after: int | None = None
+    assessment: Assessment | None = None
+    verifications: list[Verification] = []
+    data_moves: list[DataMove] = []
+    lost: list[LostItem] = []
     out_dir: str
-
-class RoundTripSummary(BaseModel):
-    roundtrip_id: str
-    baseline: TestReport          # original app tested on its own platform
-    legs: list[RunSummary]        # [aws->local, local->aws]
-    status: Literal["passed", "failed"]
 ```
 
-## 4. Mappings (owned by B, `boomerang/mappings.py`)
+## 4. Traffic-light rules (owner B, `boomerang/assess.py`)
+
+Rules decide the light; the AI only writes `analysis` and `what_changes` and may **raise** a light, never lower it.
+
+| Component / feature | Light | Why |
+|---|---|---|
+| S3 basic ops (put/get/list/delete/head) | 🟢 | S3-compatible API; endpoint + keys change only |
+| S3 presigned URLs, versioning, lifecycle rules | 🟠 | Supported differently or needs config on the target |
+| S3 event notifications → Lambda/SQS | 🔴 | No equivalent wired up; needs a human |
+| DynamoDB put/get/update/delete, query on key or GSI | 🟠 | Postgres via `kv` adapter; GSIs become indexes |
+| DynamoDB `ConditionExpression` (`attribute_not_exists` / `attribute_exists`) | 🟠 | Adapter supports these two only |
+| DynamoDB other conditions, transactions, streams, TTL, PartiQL | 🔴 | Not supported by the adapter |
+| SQS standard: send/receive/delete, visibility timeout, DLQ (maxReceiveCount) | 🟠 | RabbitMQ quorum queue + DLX via `queue` adapter |
+| SQS FIFO, message attributes filtering, delay queues | 🔴 | Not supported by the adapter |
+| IAM roles / instance profiles / policies | 🔴 | Replaced by generated, scoped service credentials; review needed |
+| Lambda functions, CloudWatch alarms, other AWS resources | 🔴 | Flagged, not migrated |
+
+## 5. `sovereign_sdk`: the adapters (shipped into the migrated app)
+
+Deterministic, unit-tested by us, copied into the migrated app by the generator. They **mimic boto3 call signatures and return shapes**, so the AI's job is mapping, not inventing.
 
 ```python
-COUNTERPART: dict[tuple[str, str], str] = {
-    ("aws.s3", "local"): "local.minio",
-    ("aws.dynamodb", "local"): "local.postgres",
-    ("aws.sqs", "local"): "local.redis",
-    ("local.minio", "aws"): "aws.s3",
-    ("local.postgres", "aws"): "aws.dynamodb",
-    ("local.redis", "aws"): "aws.sqs",
-}
-STRATEGY = {  # (from, to) -> strategy, base risk
-    ("aws.s3", "local.minio"): ("config", "low"),
-    ("local.minio", "aws.s3"): ("config", "low"),
-    ("aws.dynamodb", "local.postgres"): ("rewrite", "medium"),
-    ("local.postgres", "aws.dynamodb"): ("rewrite", "medium"),
-    ("aws.sqs", "local.redis"): ("rewrite", "medium"),
-    ("local.redis", "aws.sqs"): ("rewrite", "medium"),
-}
-CONVENTIONS: dict[tuple[str, str], str] = {...}   # text below, verbatim
-ENV_CONTRACT: dict[str, list[tuple[str, str]]] = {...}  # §6
+# sovereign_sdk/kv.py  (Postgres)
+def resource() -> "KV"                         # reads DATABASE_URL
+class KV:   def Table(self, name: str) -> "Table"
+class Table:
+    def put_item(self, Item: dict, ConditionExpression=None) -> dict
+    def get_item(self, Key: dict) -> dict      # {"Item": {...}} or {}
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeNames=None,
+                    ExpressionAttributeValues=None, ConditionExpression=None) -> dict   # "SET a = :v, #b = :w" only
+    def delete_item(self, Key: dict) -> dict
+    def query(self, KeyConditionExpression, IndexName=None) -> dict   # {"Items": [...]}; Key(x).eq(v) only
+    def scan(self) -> dict                      # {"Items": [...]} (used by the data mover)
+# Numbers are returned as Decimal, like boto3. Unsupported expressions raise UnsupportedFeature.
+# Errors raise botocore-like ConditionalCheckFailedException with .response["Error"]["Code"].
+
+# sovereign_sdk/queue.py  (RabbitMQ via pika)
+def client() -> "Queue"                        # reads AMQP_URL
+class Queue:
+    def get_queue_url(self, QueueName: str) -> dict
+    def send_message(self, QueueUrl: str, MessageBody: str) -> dict          # {"MessageId": ...}
+    def receive_message(self, QueueUrl, MaxNumberOfMessages=1, WaitTimeSeconds=0,
+                        VisibilityTimeout=None) -> dict                      # {"Messages": [{"MessageId","ReceiptHandle","Body"}]}
+    def delete_message(self, QueueUrl, ReceiptHandle) -> dict                # basic_ack
+# Semantics: quorum queue with x-delivery-limit = maxReceiveCount and a dead-letter exchange → "<name>-dlq".
+# Unacked messages older than VisibilityTimeout are nacked (requeue=True) on the next call → redelivered.
+
+# sovereign_sdk/storage.py
+def s3_client()                                # boto3 S3 client from S3_ENDPOINT_URL / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY, path-style
 ```
 
-### 4.1 Conventions (the text the rewriter prompt receives AND the generators implement)
+Postgres schema per kv table (single source: `sovereign_sdk.kv.ddl(component)`, used by the generator):
+`<pk> TEXT|NUMERIC NOT NULL, [<sk>], <one column per index key>, data JSONB NOT NULL, PRIMARY KEY(<pk>[,<sk>])` + `CREATE INDEX` per GSI. `data` holds the whole item.
 
-**aws.dynamodb → local.postgres**
-- Connect with psycopg 3: `psycopg.connect(os.environ["DATABASE_URL"], autocommit=True, row_factory=dict_row)`, one connection per operation (`with ... as conn:`).
-- The table name comes from the same env var as before (e.g. `ORDERS_TABLE`). Quote it with `psycopg.sql.Identifier`.
-- Boomerang creates the schema. **App code must not create tables.** Schema:
-  `<pk> TEXT|NUMERIC NOT NULL, [<sk> ...,] <one column per index key attribute> TEXT|NUMERIC, data JSONB NOT NULL, PRIMARY KEY (<pk>[, <sk>])`, plus `CREATE INDEX` per index on its key column(s).
-- `data` holds the **complete item**, including key attributes. Wrap with `psycopg.types.json.Jsonb(item)`.
-- `put_item` → `INSERT ... ON CONFLICT (<pk>[,<sk>]) DO UPDATE SET data = EXCLUDED.data, <promoted cols> = EXCLUDED.<...>`.
-- `get_item` → `SELECT data FROM t WHERE <pk> = %s` → dict or `None`.
-- `update_item SET a = :v` → `UPDATE t SET data = jsonb_set(data, '{a}', to_jsonb(%s::text))` (use the right cast) and also update the promoted column if `a` is a key/index attribute.
-- `query(IndexName=...)` → `SELECT data FROM t WHERE <index col> = %s`.
-- Numbers come back as `int`/`float` from JSONB (not `Decimal`). Keep return shapes identical.
+## 6. Env contract
 
-**local.postgres → aws.dynamodb**
-- `boto3.resource("dynamodb")`; region and endpoint come from the standard env (`AWS_REGION`, `AWS_ENDPOINT_URL`). Table name from the same env var.
-- Partition key = first primary-key column; sort key = second, if any. Every other promoted/indexed column becomes a GSI named `<column>-index`, projection ALL.
-- Item = the `data` JSON (it contains the key attributes).
-- UPSERT → `put_item`; select by PK → `get_item(...).get("Item")`; select by indexed column → `query(IndexName="<col>-index", KeyConditionExpression=Key(col).eq(v))`; field update → `update_item(UpdateExpression="SET #f = :v", ...)`.
-- Convert `float` → `Decimal` when writing; convert integral `Decimal` → `int` when returning.
-
-**aws.sqs → local.redis**
-- `redis.Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)`. Queue name (same env var) is a Redis **list** key.
-- `send_message(MessageBody=s)` → `r.rpush(name, s)`.
-- `receive_message(...)` → `r.blpop([name], timeout=w)` if waiting, else `r.lpop(name)`. Return the same shape the original function returned.
-- `delete_message` → no-op (pop already removed it). Keep public functions, make them no-ops.
-- ⚠️ Semantics: SQS is at-least-once with visibility timeout; a Redis list pop is at-most-once. The planner must flag it.
-
-**local.redis → aws.sqs**
-- `boto3.client("sqs")`; resolve the URL once with `get_queue_url(QueueName=name)` and cache it.
-- `rpush` → `send_message`; `lpop`/`blpop` → `receive_message(MaxNumberOfMessages=1, WaitTimeSeconds=min(timeout, 20))`, then `delete_message` right after reading (keeps pop semantics). Return the body or `None`.
-
-**aws.s3 → local.minio**
-- Keep the boto3 S3 client, but construct it with `endpoint_url=os.environ["S3_ENDPOINT_URL"]`, `aws_access_key_id=os.environ["S3_ACCESS_KEY_ID"]`, `aws_secret_access_key=os.environ["S3_SECRET_ACCESS_KEY"]`, `region_name="us-east-1"`, `config=Config(s3={"addressing_style": "path"})`. All S3 calls stay the same.
-
-**local.minio → aws.s3**
-- `boto3.client("s3")` with no explicit endpoint or keys; remove `S3_*` env usage.
-
-## 5. Env contract per platform
-
-The app reads **everything** from env vars. Resource-name vars keep their names across platforms; connection vars change.
-
-| Var | aws (lab) | local (lab) |
+| Var | aws (lab: moto) | leaseweb |
 |---|---|---|
-| `AWS_REGION`, `AWS_DEFAULT_REGION` | `us-east-1` | (unset) |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | `test` / `test` | (unset) |
-| `AWS_ENDPOINT_URL` | `http://127.0.0.1:4566` | (unset) |
-| `DATABASE_URL` | (unset) | `postgresql://boomerang:boomerang@127.0.0.1:5432/<db>` |
-| `REDIS_URL` | (unset) | `redis://127.0.0.1:6379/0` |
-| `S3_ENDPOINT_URL` | (unset) | `http://127.0.0.1:9000` |
-| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | (unset) | `boomerang` / `boomerang-secret` |
-| `ORDERS_TABLE` / `RECEIPTS_BUCKET` / `ORDER_EVENTS_QUEUE` | per-run names | per-run names |
+| `AWS_REGION` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | `us-east-1` / `test` / `test` | – |
+| `AWS_ENDPOINT_URL` | `http://127.0.0.1:4566` | – |
+| `DATABASE_URL` | – | `postgresql://shoplite:<generated>@postgres:5432/shoplite` (laptop: `127.0.0.1`) |
+| `AMQP_URL` | – | `amqp://shoplite:<generated>@rabbitmq:5672/shoplite` |
+| `S3_ENDPOINT_URL` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | – | SeaweedFS `http://seaweedfs:8333` or Leaseweb Object Storage endpoint |
+| `ORDERS_TABLE` / `RECEIPTS_BUCKET` / `ORDER_EVENTS_QUEUE` | names | same names |
 
-Use `127.0.0.1`, not `localhost`: it avoids slow IPv6 lookups on Windows, and makes boto3 use path-style S3 URLs.
+Always `127.0.0.1` on the laptop (not `localhost`): avoids slow IPv6 lookups on Windows and forces path-style S3.
 
-## 6. Run artifacts
+## 7. Pipeline
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant P as pipeline
+    U->>P: migrate(sample-app/aws)
+    P->>P: scan → PAM → assess (lights) → lock-in
+    P-->>U: plan + traffic lights
+    U->>P: approve
+    P->>P: copy app → out/app; de-lock functions (AI) ; generate Leaseweb files
+    loop max 2 attempts
+      P->>P: verify: compose config → boot → tests → health
+      alt failures
+        P->>P: fixer (AI, per function, never tests/)
+      end
+    end
+    P->>P: data: AWS (moto) → Leaseweb (counts + checksums)
+    U->>P: roundtrip
+    P->>P: create a new order on Leaseweb; copy data back → AWS; run original code's tests on AWS; counts; lost report
+    P-->>U: report + costs
+```
+
+## 8. Run artifacts
 
 ```
-runs/
-  20261121-143002-aws2local/
-    run.json                 # RunSummary
-    events.jsonl             # one Event per line
-    source.pam.json          # scanner output
-    plan.json                # MigrationPlan
-    app/                     # migrated app (tests copied unchanged)
-      .env                   # lab env for this platform
-    infra/                   # docker-compose.yml + schema.sql   OR   main.tf
-    diffs/app__db.py.diff    # unified diff per rewritten/fixed file
-    validation/attempt-1.json
-    report.md
-  rt-20261121-143002/
-    roundtrip.json           # RoundTripSummary
-    leg1 -> ../20261121-...-aws2local
-    leg2 -> ../20261121-...-local2aws
+runs/<run_id>/
+  run.json  events.jsonl  pam.json  assessment.json
+  original/                 # untouched copy of the AWS app (rollback source)
+  leaseweb/                 # THE DELIVERABLE
+    app/                    # de-locked app + sovereign_sdk/ + tests/ (copied unchanged)
+    docker-compose.yml  .env.example  cloud-init.yaml  deploy.sh  backup/pg_backup.sh
+    rabbitmq/definitions.json  seaweedfs/s3.json  schema.sql  DEPLOY.md
+    secrets.env             # generated passwords; git-ignored; never sent to the LLM
+  diffs/<file>__<function>.diff
+  verify/attempt-<n>.json
+  data/aws-to-leaseweb.json  data/leaseweb-to-aws.json
+  lost.json  report.md  cost.json
 ```
-`runs/` is git-ignored except `runs/golden/` (a recorded good run, committed for the demo fallback).
 
-## 7. Repository layout
+## 9. Repository layout
 
 ```
-boomerang/                    # the engine (Python package)
-  __init__.py
-  models.py                   # contract (C)
-  config.py                   # settings from env/.env (C)
-  events.py                   # Emitter, JSONL sink, console sink (C)
-  llm.py                      # Claude client + record/replay cache (C)
-  cli.py                      # Typer app (C; others add commands)
-  lab.py                      # docker compose wrapper: up/down/status (A)
-  mappings.py                 # COUNTERPART, STRATEGY, CONVENTIONS, ENV_CONTRACT, postgres_ddl() (B)
-  lockin.py                   # score (B)
-  scanner/static.py           # regex/AST hints (B)
-  scanner/ai.py               # LLM pass -> AppModel (B)
-  scanner/__init__.py         # scan() (B)
-  planner.py                  # (B)
-  generators/local.py         # compose, schema.sql, .env, requirements (B)
-  generators/aws.py           # main.tf, .env, requirements (B)
-  generators/templates/*.j2   # (B)
-  provisioner.py              # create/destroy resources in lab (A)
-  validator.py                # run pytest, parse junit (A)
-  rewriter.py                 # (C)
-  fixer.py                    # (C)
-  pipeline.py                 # migrate(), roundtrip() (C)
-  report.py                   # report.md (C)
-prompts/                      # scan.md, plan.md, rewrite.md, fix.md (B: scan/plan, C: rewrite/fix)
-ui/app.py                     # Streamlit (D)
-ui/components/*.py            # (D)
-sample-app/aws/               # original locked-in flavor (A)
-sample-app/local/             # hand-written local flavor (A)
-sample-app/tests/             # shared black-box tests (A)
-infra/lab.compose.yml         # the lab (A)
-fixtures/                     # example PAM, plan, events, reports (B + D)
-tests/                        # engine unit tests (everyone, light)
-runs/golden/                  # committed recorded run (D, at the end)
-demo/llm-cache/               # committed LLM cache for replay (C, at the end)
-docs/
+boomerang/
+  models.py config.py events.py cli.py llm.py redact.py      # C (redact: see 13)
+  lab.py                                                       # A
+  scanner/static.py scanner/ai.py scanner/__init__.py          # B
+  assess.py lockin.py                                          # B
+  slicer.py delock.py fixer.py rules.py pipeline.py report.py  # C
+  generators/leaseweb.py generators/templates/*.j2             # B
+  verifier.py provisioner_aws.py datamover.py                  # A
+  lost.py                                                      # B
+  cost.py                                                      # D
+sovereign_sdk/ kv.py queue.py storage.py                       # kv: B, queue: A, storage: C
+tests/sovereign_sdk/                                           # adapter tests (owners)
+pricing/prices.yaml pricing/usage.default.yaml                 # D (data collected before the event)
+prompts/ scan.md assess.md delock.md fix.md
+ui/app.py ui/components/*.py                                   # D
+sample-app/aws/ sample-app/tests/                              # A
+infra/lab.compose.yml                                          # A (moto only)
+fixtures/                                                      # B + D
+runs/golden/  demo/llm-cache/
 ```

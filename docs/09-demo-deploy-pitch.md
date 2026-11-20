@@ -1,61 +1,47 @@
-# 09 · Demo, deploy & pitch
+# 09 · Demo, deploy & pitch (v2)
 
-## 1. "Deploy" for this project
+## 1. Demo setup
+- Presenter laptop chosen by the Q1 benchmark. Docker running, `boomerang lab up`, Ollama warm (`OLLAMA_KEEP_ALIVE=60m`, one call made before going on stage).
+- `BOOMERANG_LLM_MODE=record` with the cache warm from the golden run → identical, fast re-runs. `runs/golden/` + `demo/llm-cache/` committed → **replay works offline**.
+- Leaseweb stack from the golden run already booted (saves ~30 s on stage).
+- Backup video (≤ 3 min) uploaded by T+5:30.
+- If organizers gave Leaseweb access: screenshot/URL of the real deployment, made before the demo.
 
-Boomerang is a developer tool, and it needs Docker for validation, so the demo runs on **one presenter laptop**:
-
-1. Presenter laptop = the machine with the most RAM, Docker running, lab up, `.env` set.
-2. `BOOMERANG_LLM_MODE=record` with the cache already warm from the golden run (re-runs are instant and identical).
-3. `runs/golden/` + `demo/llm-cache/` committed, so **replay works with no network**.
-4. Backup video (≤ 3 min) uploaded before T+5:30.
-
-What Boomerang **outputs** is deployable:
-- Local target: `cd runs/<id>/infra && docker compose up -d` runs the migrated app on Postgres/MinIO/Redis.
-- AWS target: `runs/<id>/infra/main.tf` is standard Terraform (`terraform init && terraform apply` with real credentials; not done in the demo).
-
-Optional, only if everything else is done: deploy the UI in replay-only mode to Streamlit Community Cloud so judges can click around. Not required.
-
-## 2. Demo run-of-show (3 minutes)
+## 2. Run-of-show (3 minutes)
 
 | Time | Screen | Say |
 |---|---|---|
-| 0:00 | Title slide | "Moving off a hyperscaler today takes months of manual rewrites, and the AI tools that exist only move you *in*. Boomerang moves you out **and** back, and proves it works." |
-| 0:20 | UI, Scan tab | "Here's ShopLite, an order service built on DynamoDB, SQS and S3. Boomerang's AI read it: 3 cloud components, 12 call sites, **lock-in 70/100**." Point at the graph. |
-| 0:45 | Plan tab | "For each service it picks an open-source counterpart, and it warns us where behavior changes: SQS is at-least-once, a Redis list isn't." |
-| 1:05 | Click **Round trip**; Migrate tab | "Now it rewrites the code, file by file, with function signatures kept identical, and generates the Docker Compose and SQL schema." Show the DynamoDB → Postgres diff. |
-| 1:35 | Validate tab | "The app's **own tests** run on real Postgres, MinIO and Redis. The first attempt failed one test. The AI read the error and fixed its own code. **7/7 green.**" (If live is slow: switch to the recorded run, say so honestly.) |
-| 2:10 | Round-trip tab | "Then the other direction: back to AWS, re-scanned from the generated code. Green again. Lock-in 70 → 8 → 70: you decide, with numbers." |
-| 2:35 | Closing slide | "No one-way doors. Boomerang makes cloud moves reversible and verified. Next: more services, more clouds, and an ops agent that runs what you moved." |
+| 0:00 | Title | "Leaving AWS means rewriting code, guessing what breaks, and hoping you can go back. Boomerang shows what breaks, moves you to Leaseweb, proves it, and brings you back." |
+| 0:20 | What breaks | "ShopLite uses DynamoDB, SQS and S3. The scan found every AWS dependency in code **and** Terraform. S3 is green: config only. DynamoDB and SQS are amber: they move through tested adapters, and here's exactly what changes. Three reds: a Lambda trigger, an IAM role and an alarm. We don't fake those; a human handles them." → **Approve** |
+| 0:55 | Code | "A local model on this laptop rewrote each function onto our adapter. Same names, same return values. S3 wasn't touched by AI: that's a config change." |
+| 1:20 | Leaseweb setup | "These are real Leaseweb files: compose, cloud-init, deploy script, backups. Watch: valid → booted → the app's **original** tests, 7 of 7 → health." ✅ |
+| 1:50 | Data & round trip | "25 orders, 25 receipts, 3 pending messages moved; counts and checksums match. Now we go back: one new order created on Leaseweb, data copied back to AWS, the original code passes its tests, 26 orders. And here's what got lost: the Lambda trigger, the IAM role, and visibility timeouts are now emulated." |
+| 2:30 | Costs | "Published prices, your usage, **plus** the hours to run it yourself. Moving the data out costs €0 from 12 January under the EU Data Act." |
+| 2:45 | Close | "No faked AI, no hidden losses, no one-way doors." |
 
-Rules: one person drives, one person talks. Don't type during the demo; everything is one click. If anything hangs for > 10 s, switch to replay without apologizing at length.
+Rules: one driver, one speaker; no typing; anything stuck > 10 s → replay, no long apology.
 
 ## 3. Slides (6)
+1. Title + tagline. 2. Problem (lock-in, unknown losses, fear, fuzzy costs). 3. How it works (scan → lights → approve → de-lock → Leaseweb files → verify → data → round trip). 4. Live demo. 5. Why trust it (tests are the spec, AI can't run commands, secrets never reach the model, AWS untouched, reds flagged). 6. Next (AI SRE, more services, Alternator path, more targets) + team.
 
-1. **Title:** Boomerang 🪃 · "Leave AWS. Come back. Nothing breaks."
-2. **Problem:** lock-in in code + no exit tooling + fear of one-way doors. One stat (e.g. 37signals' reported savings after leaving AWS, with source).
-3. **How it works:** the PAM diagram (scan → model → generate either direction) + "AI for code, templates for infra, tests as the spec".
-4. **Live demo** (just a title; switch to the UI).
-5. **Why it's different:** the comparison table from [01 §3](01-product-and-scope.md).
-6. **What's next:** more services (Lambda, IAM), more targets (EU sovereign clouds, GPU clouds), the ops agent; team.
-
-## 4. Judge Q&A, prepared answers
+## 4. Judge Q&A
 
 | Question | Answer |
 |---|---|
-| Why not just use AWS Transform? | It only moves workloads into AWS. We move out, back and between, and verify with your own tests. |
-| Why not Claude Code / a coding agent? | A coding agent edits files. Boomerang maps services, generates matching infrastructure, provisions it, and runs the tests in a loop. It's a pipeline with guarantees, not a chat. |
-| How do you know the AI didn't break things? | The original tests are the spec and the AI can't edit them. We show pass/fail for every attempt. |
-| Does it work on real AWS? | The AWS side uses standard boto3 and Terraform; in the lab we use moto, an AWS emulator, to avoid cost. Pointing it at real AWS is a credentials change. |
-| What about data? | Code and infra today; data copy is designed (stretch S1 / roadmap). |
-| Does it scale to big apps? | Per-file rewriting, the PAM and the fix loop scale with file count; bigger apps need more service mappings and better static analysis. That's the roadmap. |
-| What if semantics differ? | The planner flags each difference (e.g. delivery guarantees) before anything is changed. |
-| Cost to run? | A sample-app migration is a handful of model calls; the cache makes re-runs free. |
+| Why AI? | It reads code it hasn't seen and maps each call onto our adapters. Everything else is plain code. |
+| Why not Terraform or Kubernetes? | They set up infrastructure; they don't remove AWS from the code. |
+| How do you prove it works? | The same original tests pass on both sides, and data counts and checksums match. |
+| What if it fails? | AWS stays untouched until the checks pass. |
+| Can you go back? | Yes: we redeploy the original code and copy the data back, including data written after the move, then rerun the same tests. |
+| Why trust the AI? | It runs locally, can only propose code for one function, every output is rule-checked, and a human approves the plan. |
+| Does it really save money? | Only if the numbers say so. We use published prices and include ops costs; sometimes AWS wins. |
+| What about services you don't support? | We flag them red for a human; we don't fake them. |
+| Do passing tests prove everything? | No, only what the tests cover. Our adapter tests cover retries and the DLQ separately. |
+| Is S3 → SeaweedFS "AI migration"? | No, it's a config change, and we label it that way. |
+| Zero downtime? | We don't claim it. Cut-over needs a short write freeze; the DEPLOY.md describes it. |
 
-## 5. Submission checklist (A, by T+5:45)
+## 5. Never claim
+Zero downtime · full compatibility · "migrates any app" · "always cheaper" · "fully local" if the Claude fallback was used.
 
-- [ ] Repo public, README updated with what actually works (no claims beyond the demo)
-- [ ] `runs/golden/` and `demo/llm-cache/` committed; `.env` NOT committed
-- [ ] Backup video link in README
-- [ ] Team names filled in README
-- [ ] Hackathon submission form: title, tagline, description, repo, video, tech used
-- [ ] Slides exported to PDF
+## 6. Submission checklist (A, by T+5:45)
+- [ ] README matches what works · [ ] `runs/golden/` + `demo/llm-cache/` committed, no secrets · [ ] video link · [ ] team names · [ ] form submitted · [ ] slides PDF

@@ -1,28 +1,35 @@
-# 10 · Risks & future
+# 10 · Risks & future (v2)
 
 ## 1. Risk register
 
-| # | Risk | Likelihood | Impact | Mitigation | Owner |
-|---|---|---|---|---|---|
-| R1 | Docker not working on someone's laptop | Medium | High | Install before the event; engine work (B, C, D) can proceed with fixtures; lab on the presenter laptop | A |
-| R2 | AI rewrite produces wrong/non-compiling code | Medium | High | Conventions in the prompt, compile check + retry, fix loop, hand-written local flavor as reference | C |
-| R3 | LLM latency makes live demo slow | High | Medium | Parallel rewrites, record cache, replay mode, optional Sonnet via env | C, D |
-| R4 | API rate limit / outage during demo | Low | High | Replay mode from committed cache works offline | C |
-| R5 | Scope creep | High | High | Cut lines at each checkpoint; lead says no | C |
-| R6 | Integration surprises late | Medium | High | Shared models + fixtures from minute one; checkpoints at 2:00 and 3:30 | C |
-| R7 | moto behaves differently from real AWS | Low | Low | Only basic S3/DynamoDB/SQS ops are used; say "emulated" openly | A |
-| R8 | MinIO image unavailable | Low | Medium | `quay.io/minio/minio`, fallback `cgr.dev/chainguard/minio` | A |
-| R9 | Secret leaked in the public repo | Low | High | `.env` ignored, staged diff check, revoke immediately | All |
-| R10 | Port conflicts with local services | Medium | Low | Troubleshooting table in [08](08-setup-and-workflow.md) | A |
-| R11 | Pre-written docs vs hackathon rules | Low | High | Check rules before the event; docs are specs | Team |
-| R12 | Fix loop never needed (no failure to show) | Medium | Low | Show a recorded run with a real failure; never fake one | D |
+| # | Risk | Mitigation | Owner |
+|---|---|---|---|
+| R1 | Local 7B model too slow/unreliable on stage | Function-level prompts (< 6k tokens), one model only, `keep_alive=60m`, temperature 0, record cache, replay; Claude fallback by env | C |
+| R2 | Model swap freeze (10–25 s) | Exactly one model for every task | C |
+| R3 | "Valid JSON, wrong logic" | Reasoning field first in every schema; rules check after every output | C |
+| R4 | Rewritten code passes tests but is wrong | Tests are the original ones; adapters carry the semantics and have their own tests; say "proves what the tests cover" | C, B |
+| R5 | AI writes its own tests | Forbidden: `tests/` is read-only to the AI (rules check) | C |
+| R6 | Semantic drift DynamoDB → Postgres, SQS → RabbitMQ | Adapters handle conditions/ack/visibility/DLQ; unsupported features are 🔴 | B, A |
+| R7 | Hidden dependencies (IAM roles, S3 → Lambda triggers) | Scan Terraform, Dockerfile, serverless.yml, .env.example; flag 🔴 | B |
+| R8 | Data out of sync during rollback | Writes frozen during each copy; counts + checksums; the demo shows a write on Leaseweb coming back | A |
+| R9 | Secrets in prompts / repo | Redaction, git-ignore, scoped generated keys ([13](13-security.md)) | C, B |
+| R10 | Docker missing / ports busy | Install before the event; ports bound to 127.0.0.1; troubleshooting in [08](08-setup-and-workflow.md) | A |
+| R11 | moto differs from real AWS | Only basic ops used; say "emulated" | A |
+| R12 | Image unavailable (MinIO history) | SeaweedFS, RabbitMQ, Postgres official images; pulled before the event | A |
+| R13 | Scope too big for 6 h | Cut lines in [06](06-roadmap-6h.md); AI SRE already cut | C |
+| R14 | Prices wrong or stale | Every price has URL + date; missing price → no total shown | D |
+| R15 | Data Act rules change (Digital Omnibus) | Re-check before the demo; UI shows the legal basis and date | D |
 
-## 2. After the hackathon (product roadmap)
+## 2. Roadmap after the hackathon
 
-1. **More mappings:** Lambda ⇄ containers, IAM ⇄ policy files, SNS ⇄ NATS, RDS ⇄ Postgres (config-only), ElastiCache ⇄ Redis.
-2. **More targets:** generators for EU sovereign clouds, GPU clouds, Kubernetes/Helm.
-3. **Data migration:** online copy with checksums; dual-write cut-over plans.
-4. **The ops agent ("Phase 2")**: after migration, an agent watches metrics/logs of the self-hosted stack, diagnoses incidents, proposes fixes with human approval, writes postmortems. Removes the second reason companies stay on hyperscalers: operations.
-5. **Larger codebases:** AST-based static analysis, dependency-graph-aware rewrite ordering, per-module test selection.
-6. **Languages:** TypeScript/Node, Java.
-7. **Cost model:** real provider pricing → savings and break-even per move.
+1. **AI SRE (cut from the hackathon, designed):** watches the Leaseweb stack and proposes fixes. Design rules, carried over from the team's analysis:
+   - Output is a **fixed enum action** (e.g. `RESTART_SERVICE`, `ROTATE_SERVICE_KEY`) chosen after a `root_cause_analysis` field, never a shell string; execution is separate, deterministic code.
+   - **Log sanitization:** truncate and strip log lines before they reach the model (log injection via User-Agent etc.).
+   - **Two-phase key rotation:** create new key → update app secret + rolling restart → verify health 200 → revoke old key.
+   - **Cooldown lock:** max 1 automated action per service per 60 s; no restart loops.
+   - **Human approval** for anything beyond restart; no secrets in prompts.
+2. **ScyllaDB Alternator path** for DynamoDB-heavy apps (green: endpoint change only).
+3. More mappings: Lambda → containers + cron/queue consumers, SNS, EventBridge, IAM → policy review.
+4. Real Leaseweb provisioning via the official Terraform provider; Leaseweb Object Storage by default.
+5. Online data sync for near-zero-downtime cut-over (still never claimed as zero).
+6. More languages (TypeScript, Java) and bigger codebases (dependency-aware ordering).

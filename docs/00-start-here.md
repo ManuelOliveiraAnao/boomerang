@@ -1,52 +1,49 @@
-# 00 · Start here
+# 00 · Start here (v2)
 
-You have **6 hours**. Read this page (5 min), then the docs for your role (15 min max), then build.
+You have **6 hours**. Read this page (5 min), then your role's docs (15 min), then build.
 
 ## The one-paragraph version
 
-Boomerang takes a small Python app that uses AWS (S3, DynamoDB, SQS), and an AI rewrites it to use MinIO, Postgres and Redis running locally, then proves it works by running the app's original tests. Then it does the reverse (local → AWS). The demo is the round trip, AWS → local → AWS, with green tests at each step. AWS is emulated locally with **moto**, so nobody needs an AWS account.
+Boomerang scans an AWS app (code **and** Terraform), labels every service and feature 🟢 config only / 🟠 adapter with listed changes / 🔴 needs a human, and, after a human approves, uses a **local AI model** to move the code onto small, pre-tested adapters. It generates **ready-to-use Leaseweb files**, boots them on the laptop, runs the app's **original** tests, moves the data with matching counts, then goes **back to AWS** (original code + data copied back) and shows **what got lost**. Costs come from a **real price table**, with self-hosting effort included.
 
-## Reading order by role
+**What changed from v1 and why:** [11 Decisions](11-decisions.md), last section.
+
+## Reading order
 
 | Everyone (10 min) | Then, by role |
 |---|---|
-| This page | **A, Platform:** [04 Sample app](04-sample-app.md), [03 Components](03-components.md) §Provisioner, §Validator, [08 Setup](08-setup-and-workflow.md) §Lab |
-| [02 Architecture](02-architecture.md) (the PAM contract is critical) | **B, Understand:** [03 Components](03-components.md) §Scanner, §Lock-in, §Mappings, §Planner, §Generators |
-| [07 Team & tasks](07-team-and-tasks.md), your section | **C, Transform / lead:** all of [03 Components](03-components.md), [06 Roadmap](06-roadmap-6h.md) |
-| [06 Roadmap](06-roadmap-6h.md), the checkpoints | **D, Experience:** [05 UI](05-ui.md), [09 Demo & pitch](09-demo-deploy-pitch.md), [01 Product](01-product-and-scope.md) |
+| This page | **A, Platform & Data:** [04 Sample app](04-sample-app.md), [03](03-components.md) §3.8 §3.10 §3.11, [02 §5](02-architecture.md) (queue adapter), [14](14-leaseweb-target.md) §3 |
+| [11 Decisions](11-decisions.md) | **B, Understand & Generate:** [02 §3–§5](02-architecture.md), [03](03-components.md) §3.3 §3.4 §3.7 §3.12, [14 Leaseweb files](14-leaseweb-target.md), [13](13-security.md) S4 |
+| [02 Architecture](02-architecture.md) §1–§3 | **C, Lead & Transform:** all of [03](03-components.md), [13 Security](13-security.md), [06 Roadmap](06-roadmap-6h.md) |
+| [07 Team & tasks](07-team-and-tasks.md), [06 Roadmap](06-roadmap-6h.md) | **D, Experience & Costs:** [05 UI](05-ui.md), [12 Costs](12-costs.md), [09 Demo & pitch](09-demo-deploy-pitch.md) |
 
-## Golden rules for the 6 hours
+## Golden rules
+1. `boomerang/models.py` ([02 §3](02-architecture.md)) is the contract. Changes go through the lead.
+2. Own your files ([07](07-team-and-tasks.md)). Build against `fixtures/`, not against each other.
+3. Checkpoints at **2:00, 3:30, 4:30** are mandatory; apply the cut lines in [06](06-roadmap-6h.md).
+4. **Don't fake AI work.** S3 → S3-compatible is a config change and is labeled that way.
+5. **The AI never writes or edits tests**, never runs commands, never sees secrets.
+6. **Never claim** zero downtime, full compatibility, "migrates any app", or "always cheaper".
+7. The repo is public: never commit `.env`, `secrets.env` or keys.
 
-1. **The contract is [02 Architecture](02-architecture.md) §3–§5.** If you need to change a model in `boomerang/models.py`, tell the tech lead first. Everyone codes against it.
-2. **Own your files.** Each task in [07](07-team-and-tasks.md) lists the files it owns. Don't edit someone else's files without asking. This is how we avoid merge conflicts.
-3. **Build against fixtures, not each other.** `fixtures/` holds example PAM, plan, events and test reports. The UI and later pipeline stages are built against them from minute one.
-4. **Integrate early.** Checkpoints at **T+2:00** and **T+3:30** are mandatory (see [06](06-roadmap-6h.md)).
-5. **Cut, don't slip.** If something is behind at a checkpoint, apply the cut line in [06](06-roadmap-6h.md). The demo must work at T+5:00.
-6. **Push small and often** to `main` via short-lived branches (see [08](08-setup-and-workflow.md)).
-7. **Never commit secrets.** The repo is public. `.env` is git-ignored; keep it that way.
-
-## Before the clock starts (do this at home)
-
-Everything here is setup, not code, so it doesn't eat build time.
-
-- [ ] Install **Docker Desktop** and start it once (on Windows it needs WSL2, which can take 30+ minutes).
-- [ ] Pull images: `docker pull postgres:16-alpine redis:7-alpine quay.io/minio/minio:latest motoserver/moto:latest`
-- [ ] Install **Python 3.12** and **uv** (`pip install uv`).
-- [ ] Install **git**, and an editor.
-- [ ] Clone the repo and read your docs.
-- [ ] Have a GitHub account and accept the repo invite / have push access.
-- [ ] **One person:** create an Anthropic API key and set a spend limit in the Anthropic Console. Share it privately (not in the repo or a public chat).
-- [ ] **Check the hackathon rules** on pre-written code. These docs are a plan and specs, which most events allow. If code must be written during the event, treat the code blocks here as specs to type in, not files to copy.
+## Before the clock starts
+- [ ] Docker Desktop installed and running; images pulled ([08 §1](08-setup-and-workflow.md))
+- [ ] Ollama installed; `qwen2.5-coder:7b` pulled; **Q1 benchmark run** on your laptop ([11](11-decisions.md))
+- [ ] Python 3.12 + uv; repo cloned **outside OneDrive** (e.g. `C:\dev\boomerang`)
+- [ ] D: `pricing/prices.yaml` filled from official pages, with URL + date per line ([12](12-costs.md))
+- [ ] Someone asks the organizers about Leaseweb access (Q5)
+- [ ] Optional: an Anthropic API key with a spend limit, only for the fallback (shared privately)
+- [ ] Check the hackathon's rules on pre-written material (these docs are specs, not code)
 
 ## Glossary
 
 | Term | Meaning |
 |---|---|
-| **PAM** | Portable App Model: a platform-neutral JSON description of what the app needs (an object store, a key-value table, a queue) and where in the code it uses them |
-| **Platform** | `aws` or `local` |
-| **Provider** | A concrete service: `aws.s3`, `aws.dynamodb`, `aws.sqs`, `local.minio`, `local.postgres`, `local.redis` |
-| **Component** | One infrastructure dependency of the app, e.g. the `orders` table |
-| **Lab** | The Docker Compose stack every developer runs: moto (fake AWS), Postgres, MinIO, Redis |
-| **Run** | One migration execution; its artifacts live in `runs/<run_id>/` |
-| **Leg** | One direction of a round trip |
-| **Flavor** | A version of the sample app: `aws` (original, locked in) or `local` (hand-written reference) |
+| **PAM** | Portable App Model: what the app uses (tables, buckets, queues, triggers, roles) and where in code/infra |
+| **Traffic light** | 🟢 config only · 🟠 moves via adapter, behavior differences listed · 🔴 not migrated, human needed |
+| **sovereign_sdk** | Our small, tested adapters (`kv` → Postgres, `queue` → RabbitMQ, `storage` → S3-compatible) that mimic boto3 |
+| **De-lock** | Rewriting functions that call AWS so they call `sovereign_sdk` instead |
+| **Leaseweb files** | The generated, deployable setup in `runs/<id>/leaseweb/` |
+| **Verify** | Config valid → boots → original tests pass → health OK |
+| **Round trip** | AWS → Leaseweb → back to AWS (original code + data copied back) |
+| **Lab** | Fake AWS (moto) on the laptop |

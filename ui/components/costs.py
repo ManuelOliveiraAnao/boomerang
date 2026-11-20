@@ -116,7 +116,8 @@ def _total_card(title: str, color: str, total: float | None, infra: float | None
 def render(src: Source) -> None:
     prices, usage, ops = _defaults()
     u, o, migration_date = _inputs(usage, ops)
-    r = cost.compute(prices, u, o, today=migration_date)
+    scope = (src.summary.get("scope") or {}).get("selfhosted") or (src.json("approval") or {}).get("scope")
+    r = cost.compute(prices, u, o, today=migration_date, scope=scope)
 
     if r["missing"]:
         st.error("No total shown: these prices are missing from pricing/prices.yaml → "
@@ -125,14 +126,25 @@ def render(src: Source) -> None:
     t = r["totals"] or {}
     aws_lines = [ln for ln in r["lines"] if ln["side"] == "aws" and ln["kind"] == "monthly"]
     lw_lines = [ln for ln in r["lines"] if ln["side"] == "leaseweb"]
+    hyb_lines = [ln for ln in r["lines"] if ln["side"] == "hybrid"]
     aws_ops = sum(ln["cost_eur"] or 0 for ln in aws_lines if ln["category"] == "ops")
     lw_ops = sum(ln["cost_eur"] or 0 for ln in lw_lines if ln["category"] == "ops")
+    hyb_ops = sum(ln["cost_eur"] or 0 for ln in hyb_lines if ln["category"] == "ops")
 
-    c1, c2 = st.columns(2)
-    c1.markdown(_total_card("AWS · eu-central-1", AWS_ORANGE, t.get("aws"), t.get("aws_infra"),
-                            f"ops {_eur(aws_ops)}"), unsafe_allow_html=True)
-    c2.markdown(_total_card("Leaseweb", LEASEWEB_RED, t.get("leaseweb"), t.get("leaseweb_infra"),
-                            f"ops {_eur(lw_ops)}"), unsafe_allow_html=True)
+    if hyb_lines:
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(_total_card("AWS · eu-central-1", AWS_ORANGE, t.get("aws"), t.get("aws_infra"),
+                                f"ops {_eur(aws_ops)}"), unsafe_allow_html=True)
+        c2.markdown(_total_card(f"Hybrid ({', '.join(scope or [])})", LIGHT_COLORS["amber"], t.get("hybrid"),
+                                t.get("hybrid_infra"), f"ops {_eur(hyb_ops)}"), unsafe_allow_html=True)
+        c3.markdown(_total_card("Leaseweb (full)", LEASEWEB_RED, t.get("leaseweb"), t.get("leaseweb_infra"),
+                                f"ops {_eur(lw_ops)}"), unsafe_allow_html=True)
+    else:
+        c1, c2 = st.columns(2)
+        c1.markdown(_total_card("AWS · eu-central-1", AWS_ORANGE, t.get("aws"), t.get("aws_infra"),
+                                f"ops {_eur(aws_ops)}"), unsafe_allow_html=True)
+        c2.markdown(_total_card("Leaseweb", LEASEWEB_RED, t.get("leaseweb"), t.get("leaseweb_infra"),
+                                f"ops {_eur(lw_ops)}"), unsafe_allow_html=True)
     st.write("")
 
     # ---- verdict ----
@@ -160,6 +172,9 @@ def render(src: Source) -> None:
 
     st.markdown("#### AWS · monthly lines")
     _table(aws_lines)
+    if hyb_lines:
+        st.markdown(f"#### Hybrid ({', '.join(scope or [])} self-hosted) · monthly lines")
+        _table(hyb_lines)
     st.markdown("#### Leaseweb · monthly lines")
     _table(lw_lines)
     st.markdown("#### One-off")

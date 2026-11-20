@@ -361,6 +361,7 @@ def data(
 @app.command()
 def cost(
     usage: Annotated[Path | None, typer.Option(help="Usage YAML (default: pricing/usage.default.yaml).")] = None,
+    only: Only = None,
 ) -> None:
     """Monthly AWS vs Leaseweb costs from published prices, your usage and ops hours."""
     with _handled():
@@ -376,8 +377,12 @@ def cost(
                 raise FileNotFoundError(f"missing {path}")
             return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
-        result = cost_mod.estimate(load(pricing / "prices.yaml"), load(usage or pricing / "usage.default.yaml"),
-                                   load(pricing / "ops.yaml"))
+        scope = _ids(only)
+        result = (cost_mod.estimate(load(pricing / "prices.yaml"), load(usage or pricing / "usage.default.yaml"),
+                                    load(pricing / "ops.yaml"))
+                  if scope is None else
+                  cost_mod.estimate(load(pricing / "prices.yaml"), load(usage or pricing / "usage.default.yaml"),
+                                    load(pricing / "ops.yaml"), scope))
     console.print(result)
 
 

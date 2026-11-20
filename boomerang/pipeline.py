@@ -641,6 +641,8 @@ def _lock_in_after(ctx: RunContext) -> None:
 def _verify_loop(ctx: RunContext, pam: AppModel) -> None:
     """L11: at most ``max_fix_attempts`` fixer rounds → at most 1 + that many verifications."""
     max_fix = get_settings().max_fix_attempts
+    if scopes.is_hybrid(pam, ctx.scope):
+        _call(ctx, "provision hybrid AWS", provisioner_aws.provision, pam, ctx.emitter, default=None)
     _set_active_stack(ctx.run_id)                # verify replaces whatever stack is up (fixed host ports)
     for attempt in range(1, max_fix + 2):
         v: Verification = _call(ctx, "verify", verifier.verify, ctx.leaseweb, attempt, ctx.emitter,

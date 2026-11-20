@@ -140,3 +140,25 @@ def test_infra_totals_exclude_ops_hours(prices, usage, ops):
     r = cost.compute(prices, usage, ops, today=BEFORE)
     assert r["totals"]["aws"] - r["totals"]["aws_infra"] == pytest.approx(10)
     assert r["totals"]["leaseweb"] - r["totals"]["leaseweb_infra"] == pytest.approx(20)
+
+
+def test_hybrid_cost_column_sums_kept_aws_moved_selfhosted_and_ongoing_egress(prices, usage, ops):
+    r = cost.estimate(prices, usage, ops, scope=["orders", "receipts"], today=BEFORE)
+    hyb_lines = [ln for ln in r["lines"] if ln["side"] == "hybrid"]
+    assert hyb_lines
+    items = {ln["item"] for ln in hyb_lines}
+    assert "SQS requests (kept on AWS)" in items
+    assert "Ongoing AWS → self-hosted egress" in items
+    assert not any("DynamoDB" in item for item in items)
+    assert not any("S3" in item for item in items)
+    hyb_total = sum(ln["cost_eur"] for ln in hyb_lines)
+    assert r["totals"]["hybrid"] == pytest.approx(hyb_total, abs=0.01)
+    assert r["totals"]["hybrid"] - r["totals"]["hybrid_infra"] == pytest.approx(30)  # 20 self-hosted + 10 kept AWS
+
+
+def test_full_or_none_scope_omits_hybrid_cost_column(prices, usage, ops):
+    r_none = cost.estimate(prices, usage, ops, scope=None, today=BEFORE)
+    r_full = cost.estimate(prices, usage, ops, scope=["orders", "receipts", "order_events"], today=BEFORE)
+    assert "hybrid" not in r_none["totals"]
+    assert "hybrid" not in r_full["totals"]
+    assert not [ln for ln in r_full["lines"] if ln["side"] == "hybrid"]

@@ -65,14 +65,14 @@ Merged B's `member-b-partial-migration` (`e85c28f`: `Scope`/`ScopeStep` models, 
 | C | CLI: `boomerang approve <id> --only orders,receipts`, `migrate --only …`, `move-over <id> order_events`, `move-back <id> orders` | `cli.py` |
 | A | `datamover.move(..., components=[...])` (default: all, unchanged) | `datamover.py` |
 | B | hybrid env used `<aws-name>` placeholders, which overrode the queue name in `laptop.env`: now the real names; `assess` shares `scope.hybrid_finding` | `generators/leaseweb.py`, `assess.py` |
-| D | "What breaks": a checkbox per movable component, "Approve: move N of M", hybrid warning; "Data & round trip": where each component runs, Move over / Move back on a live run, step history | `ui/components/breaks.py`, `roundtrip.py`, `ui/runner.py` |
+| D | "What breaks": a checkbox per movable component, "Approve: move N of M", hybrid warning; "Data & round trip": where each component runs, Move over / Move back on a live run, step history; "Costs": `cost.estimate(..., scope)` hybrid column (kept AWS + moved self-hosted + ongoing cross-cloud egress + ops hours) | `ui/components/breaks.py`, `roundtrip.py`, `costs.py`, `ui/runner.py`, `cost.py` |
 
 Full scope (the default) = the old behaviour; the other roles are called exactly as before. Lock-in before/after
 are scored with an empty scope (B's `score()` now excludes the scope; its default would drop every component).
-Tests: `tests/test_partial_migration.py` (14). Checked in the browser: unchecking `order_events` → "Approve: move
-2 of 3" → `approval.json` scope `[orders, receipts]` → `execute` uses it.
+Tests: `tests/test_partial_migration.py` (15), `tests/test_cost.py`, `tests/test_datamover.py`, `tests/test_verifier.py`.
+Checked in the browser: unchecking `order_events` → "Approve: move 2 of 3" → `approval.json` scope `[orders, receipts]` → `execute` uses it.
 
-**Not done / limits:** the hybrid cost column (D, `cost.estimate(..., scope)`); a real hybrid run (lab + Docker:
+**Not done / limits:** a real hybrid run (lab + Docker:
 the containers reach moto through `host.docker.internal`); during a hybrid verify the app's tests drain the
 SQS queue that stays on AWS (its seeded messages are not counted anywhere, but they are gone); B's new `scan()`
 calls the AI, so `plan` needs Ollama (or `BOOMERANG_ALLOW_FIXTURES=1` for static hints only).

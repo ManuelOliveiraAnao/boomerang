@@ -259,3 +259,17 @@ def test_move_emits_data_events(two_sides):
     datamover.move(PAM, "aws->leaseweb", src_env, dst_env, Emitter("t", [events.append]), sides=(src, dst))
     assert events and all(e.stage == "data" for e in events)
     assert any(e.level == "success" and "orders: 25 -> 25" in e.message for e in events)
+
+
+def test_move_with_components_filters_selected_components():
+    t_src = PagedTable([{"order_id": str(i), "v": i} for i in range(5)])
+    t_dst = PagedTable([])
+    s_src = PagedS3({"k1": b"1", "k2": b"2"})
+    s_dst = PagedS3({})
+    src = datamover.Side("aws", {}, table=lambda n: t_src, s3=lambda: s_src, queue=lambda: None)
+    dst = datamover.Side("leaseweb", {}, table=lambda n: t_dst, s3=lambda: s_dst, queue=lambda: None)
+    move = datamover.move(PAM, "aws->leaseweb", {}, {}, sides=(src, dst), components=["orders"])
+    assert [c.component_id for c in move.counts] == ["orders"]
+    assert move.counts[0].source_count == move.counts[0].target_count == 5
+    assert move.ok
+    assert s_dst.objects == {}  # out-of-scope component untouched

@@ -3,7 +3,6 @@ import os
 from decimal import Decimal
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 dynamodb = boto3.resource("dynamodb")
 
@@ -45,14 +44,16 @@ def put_order(order: dict) -> None:
 
 
 def get_order(order_id: str) -> dict | None:
-    item = _table().get_item(Key={"order_id": order_id}).get("Item")
+    # strongly consistent read: reads its own writes immediately after put_order
+    item = _table().get_item(Key={"order_id": order_id}, ConsistentRead=True).get("Item")
     return _from_ddb(item) if item else None
 
 
 def list_orders_by_customer(customer_id: str) -> list[dict]:
     resp = _table().query(
         IndexName="customer_id-index",
-        KeyConditionExpression=Key("customer_id").eq(customer_id),
+        KeyConditionExpression="customer_id = :c",
+        ExpressionAttributeValues={":c": customer_id},
     )
     return [_from_ddb(i) for i in resp.get("Items", [])]
 

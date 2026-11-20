@@ -1,6 +1,10 @@
-"""Live verification of a generated Leaseweb setup, plus the shared pytest runner.
+"""Live verification of a generated Leaseweb setup, plus the shared pytest runner. Owner A, task A5.
 
 verify():  config valid -> stack boots -> schema exists -> ORIGINAL tests pass -> health 200
+
+Contract with C (docs/03 §3.8, docs/15 L4/L8): verify(leaseweb_dir, attempt, emit),
+run_tests(app_dir, env, platform, attempt, emit), aws_env(), leaseweb_env(leaseweb_dir),
+reset_data(leaseweb_dir), stop_service(leaseweb_dir, name), start_service(leaseweb_dir, name).
 """
 from __future__ import annotations
 
@@ -19,7 +23,7 @@ from typing import Callable
 
 import yaml
 
-from .events import Emitter, null_emitter
+from .events import Emitter
 from .models import Check, Platform, TestFailure, TestReport, Verification
 
 PROJECT = "bmr-verify"
@@ -27,20 +31,26 @@ HEALTH_URL = "http://127.0.0.1:8080/health"
 # Container host -> laptop address (contract with B, docs/roles/A-platform-and-data.md §4.1)
 HOST_PORTS = {"postgres:5432": "127.0.0.1:5432", "rabbitmq:5672": "127.0.0.1:5672",
               "seaweedfs:8333": "127.0.0.1:8333", "api:8080": "127.0.0.1:8080"}
-APP_ENV_KEYS = {"DATABASE_URL", "AMQP_URL", "ORDERS_TABLE", "RECEIPTS_BUCKET", "ORDER_EVENTS_QUEUE"}
-APP_ENV_PREFIXES = ("AWS_", "S3_")
+# L8: the app under test (AI-edited) gets an allowlisted environment, never a copy of ours:
+# no ANTHROPIC_API_KEY, no developer AWS credentials, nothing from the other platform.
+ENV_ALLOWLIST = ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP",
+                 "TMPDIR", "USERPROFILE", "HOME", "LOCALAPPDATA", "APPDATA", "LANG", "LC_ALL")
 
 Run = Callable[..., subprocess.CompletedProcess]
 
 
 # ---------------------------------------------------------------- pytest runner
+def _emit(emit: Emitter | None, stage, message: str, level: str = "info", **data) -> None:
+    if emit is not None:
+        emit.emit(stage, message, level, **data)
+
+
 def clean_env(extra: dict[str, str], app_dir: Path) -> dict[str, str]:
-    """os.environ minus anything that could point the app at the wrong platform, plus `extra`."""
-    env = {k: v for k, v in os.environ.items()
-           if k not in APP_ENV_KEYS and not k.startswith(APP_ENV_PREFIXES)}
+    """Allowlisted OS variables + the platform's variables (`extra`) + Python settings."""
+    env = {k: v for k, v in os.environ.items() if k.upper() in ENV_ALLOWLIST}
     env.update(extra)
-    env["PYTHONPATH"] = str(app_dir)
-    env["PYTHONIOENCODING"] = "utf-8"
+    env.update({"PYTHONPATH": str(app_dir), "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
+                "PYTHONDONTWRITEBYTECODE": "1"})
     return env
 
 
@@ -99,6 +109,21 @@ def run_pytest(app_dir: Path, tests_dir: Path, env: dict[str, str], platform: Pl
         return parse_junit(junit, attempt, platform, round(time.time() - start, 2), output)
 
 
+def run_tests(app_dir: Path, env: dict[str, str], platform: Platform, attempt: int,
+              emit: Emitter | None = None, timeout_s: int = 180) -> TestReport:
+    """C's contract (L8): the app's own `tests/` folder, in a subprocess, against `env`."""
+    report = run_pytest(Path(app_dir), Path(app_dir) / "tests", env, platform, attempt, timeout_s)
+    _emit(emit, "verify", f"tests on {platform}: {report.passed}/{report.total} passed",
+          "success" if report.ok else "error", step="tests", report=report)
+    return report
+
+
+def aws_env() -> dict[str, str]:
+    """Env for the AWS side: the fake AWS (moto) + the resource names of the last provision()."""
+    from . import lab, provisioner_aws
+    return lab.aws_env() | provisioner_aws.last_names()
+
+
 # ---------------------------------------------------------------- env files
 def read_env_file(path: Path) -> dict[str, str]:
     env = {}
@@ -127,11 +152,20 @@ def laptop_env(leaseweb_dir: Path) -> dict[str, str]:
     return env
 
 
+def leaseweb_env(leaseweb_dir: Path) -> dict[str, str]:
+    """C's contract (L8): env for the Leaseweb side on the laptop (127.0.0.1 ports, real secrets)."""
+    return laptop_env(leaseweb_dir)
+
+
 # ---------------------------------------------------------------- docker compose
 def _compose(leaseweb_dir: Path) -> list[str]:
-    cmd = ["docker", "compose", "-f", str(Path(leaseweb_dir) / "docker-compose.yml"), "-p", PROJECT]
-    if (Path(leaseweb_dir) / ".env.example").exists():
-        cmd += ["--env-file", str(Path(leaseweb_dir) / ".env.example")]
+    """`docker compose` for the stack. Later --env-file entries win: secrets.env holds the generated
+    passwords the compose file references (${POSTGRES_PASSWORD} ...)."""
+    d = Path(leaseweb_dir)
+    cmd = ["docker", "compose", "-f", str(d / "docker-compose.yml"), "-p", PROJECT]
+    for name in (".env.example", "secrets.env"):
+        if (d / name).exists():
+            cmd += ["--env-file", str(d / name)]
     return cmd
 
 
@@ -256,43 +290,95 @@ def check_health(url: str = HEALTH_URL, timeout_s: float = 30) -> Check:
 
 def verify(leaseweb_dir: Path, attempt: int = 1, emit: Emitter | None = None,
            run: Run = subprocess.run, health_url: str = HEALTH_URL) -> Verification:
-    """config -> boot -> schema -> tests -> health. Stops at the first failing infra check."""
-    emit = emit or null_emitter()
+    """config -> boot -> schema -> tests -> health. Stops at the first failing infra check.
+    L4: the `worker` container is stopped while the tests run (they call process_once themselves)."""
     d = Path(leaseweb_dir)
     checks: list[Check] = []
 
     def record(c: Check) -> bool:
         checks.append(c)
-        emit("verify", f"{c.name}: {'OK' if c.ok else 'FAILED'} - {c.detail[:200]}",
-             level="success" if c.ok else "error", check=c.model_dump())
+        _emit(emit, "verify", f"{c.name}: {'OK' if c.ok else 'FAILED'} - {c.detail[:200]}",
+              "success" if c.ok else "error", check=c, attempt=attempt)
         return c.ok
 
     if not record(check_config(d, run)) or not record(check_boot(d, run)):
         return Verification(checks=checks)
-    env = laptop_env(d)
+    env = leaseweb_env(d)
     if not record(check_schema(d, env)):
         return Verification(checks=checks)
-    report = run_pytest(d / "app", d / "app" / "tests", env, "leaseweb", attempt)
+    stop_service(d, "worker", run)
+    try:
+        report = run_pytest(d / "app", d / "app" / "tests", env, "leaseweb", attempt)
+    finally:
+        start_service(d, "worker", run)
     record(Check(name="tests", ok=report.ok, detail=f"{report.passed}/{report.total} passed",
                  duration_s=report.duration_s))
     record(check_health(health_url))
     return Verification(checks=checks, tests=report)
 
 
+def stop_service(leaseweb_dir: Path, name: str, run: Run = subprocess.run) -> None:
+    """`docker compose stop <name>` (e.g. the worker during tests and data moves, L4)."""
+    run(_compose(leaseweb_dir) + ["stop", name], capture_output=True, text=True)
+
+
+def start_service(leaseweb_dir: Path, name: str, run: Run = subprocess.run) -> None:
+    run(_compose(leaseweb_dir) + ["start", name], capture_output=True, text=True)
+
+
+def _queue_names(leaseweb_dir: Path) -> list[str]:
+    defs = Path(leaseweb_dir) / "rabbitmq" / "definitions.json"
+    if not defs.exists():
+        return []
+    return [q["name"] for q in json.loads(defs.read_text(encoding="utf-8")).get("queues", [])]
+
+
+def reset_data(leaseweb_dir: Path, emit: Emitter | None = None) -> dict[str, int]:
+    """Empty tables, queues and buckets of the verify stack; keep the schema (L4).
+    Returns what was removed. Needs the stack running."""
+    d = Path(leaseweb_dir)
+    env = leaseweb_env(d)
+    removed = {"rows": 0, "messages": 0, "objects": 0}
+    tables = _kv_tables(d)
+    if tables and env.get("DATABASE_URL"):
+        import psycopg
+        from psycopg import sql
+        with psycopg.connect(env["DATABASE_URL"], connect_timeout=5, autocommit=True) as conn:
+            for t in tables:
+                removed["rows"] += conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(t))).rowcount
+    queues = _queue_names(d)
+    if queues and env.get("AMQP_URL"):
+        import pika
+        conn = pika.BlockingConnection(pika.URLParameters(env["AMQP_URL"]))
+        try:
+            ch = conn.channel()
+            for q in queues:
+                removed["messages"] += ch.queue_purge(q).method.message_count
+        finally:
+            conn.close()
+    if env.get("S3_ENDPOINT_URL"):
+        import boto3
+        from botocore.config import Config
+        s3 = boto3.client("s3", endpoint_url=env["S3_ENDPOINT_URL"], region_name=env.get("S3_REGION", "us-east-1"),
+                          aws_access_key_id=env.get("S3_ACCESS_KEY_ID"),
+                          aws_secret_access_key=env.get("S3_SECRET_ACCESS_KEY"),
+                          config=Config(s3={"addressing_style": "path"}))
+        for b in s3.list_buckets().get("Buckets", []):
+            for page in s3.get_paginator("list_objects_v2").paginate(Bucket=b["Name"]):
+                keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+                if keys:
+                    s3.delete_objects(Bucket=b["Name"], Delete={"Objects": keys, "Quiet": True})
+                    removed["objects"] += len(keys)
+    _emit(emit, "data", f"verify stack emptied: {removed}", "success", step="reset_data", removed=removed)
+    return removed
+
+
 def reset_stack(leaseweb_dir: Path, emit: Emitter | None = None, run: Run = subprocess.run) -> Check:
-    """Wipe data volumes and boot again (the tests wrote orders; data moves need a clean stack)."""
-    emit = emit or null_emitter()
+    """Heavier alternative to reset_data: wipe the volumes and boot again."""
     run(_compose(leaseweb_dir) + ["down", "-v"], capture_output=True, text=True)
     c = check_boot(leaseweb_dir, run)
-    emit("data", f"stack reset: {'OK' if c.ok else 'FAILED'}", level="success" if c.ok else "error")
+    _emit(emit, "data", f"stack reset: {'OK' if c.ok else 'FAILED'}", "success" if c.ok else "error")
     return c
-
-
-def freeze(leaseweb_dir: Path, emit: Emitter | None = None, run: Run = subprocess.run) -> None:
-    """Write freeze before copying data back: stop the api and worker containers."""
-    emit = emit or null_emitter()
-    run(_compose(leaseweb_dir) + ["stop", "api", "worker"], capture_output=True, text=True)
-    emit("rollback", "write freeze: api + worker stopped")
 
 
 def teardown(leaseweb_dir: Path, run: Run = subprocess.run) -> None:

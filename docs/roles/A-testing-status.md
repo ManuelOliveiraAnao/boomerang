@@ -1,7 +1,18 @@
 # Role A · Testing status
 
-Last full run: **102 passed, 20 skipped, 0 failed** (`pytest -q`, about 4½ minutes; `pytest -q -m "not slow"` skips the 1,000-object copy test and takes about 2 minutes).
-Machine: Windows 11, Python 3.12, **no Docker**. Fake AWS ran as a local moto process.
+> **Update (after merging C's scaffold, `role-c`):** A's modules now follow C's contract (docs/15 L4/L5/L8/L13/L15/L17):
+> `lab.up/down/status() -> bool/reset()`, `provisioner_aws.provision(pam, emit)` / `seed(pam, count, emit)`,
+> `verifier.verify / run_tests / aws_env / leaseweb_env / reset_data / stop_service / start_service`,
+> `datamover.move(pam, direction, src_env, dst_env, emit)`. Commands now come from C's CLI (`boomerang lab …`, `verify <run_id>`, `data <run_id>`).
+>
+> **How to run tests now** (C's convention: a bare `pytest` never needs Docker or a model):
+> - `pytest` → unit tests only (~35 s, no Docker).
+> - `boomerang lab up` + `python -c "from boomerang import lab; lab.up(adapters=True)"`, then `pytest -m integration` → fake AWS, real RabbitMQ, real Postgres, real stack boot.
+>
+> **Docker is installed now.** Section 2 below was written before that; N1–N4 and N7 have since been run: real RabbitMQ found the `nack` vs `reject` dead-letter bug (fixed), and the minimal stack boots.
+
+Last full run before Docker: **102 passed, 20 skipped, 0 failed** (`pytest -q`, about 4½ minutes; `pytest -q -m "not slow"` skips the 1,000-object copy test and takes about 2 minutes).
+Machine: Windows 11, Python 3.12, no Docker at the time. Fake AWS ran as a local moto process.
 
 ## 1. What is tested
 

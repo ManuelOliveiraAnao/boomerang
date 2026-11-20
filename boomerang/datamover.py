@@ -1,20 +1,21 @@
-"""Copy an app's data between AWS and Leaseweb, then prove it with counts and checksums.
+"""Copy an app's data between AWS and Leaseweb, then prove it with counts and checksums. Owner A, task A6.
 
-Both sides expose boto3-shaped handles: AWS uses boto3, Leaseweb uses sovereign_sdk adapters
-(which mimic boto3). Run with the app stopped (write freeze), see verifier.freeze().
+Contract with C (docs/03 §3.11): move(pam, direction, src_env, dst_env, emit), where src/dst follow
+the direction. Both sides expose boto3-shaped handles: AWS uses boto3, Leaseweb uses the
+sovereign_sdk adapters (which mimic boto3). Run with writers stopped (verifier.stop_service, L4).
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Literal
 
 import boto3
 
-from .events import Emitter, null_emitter
+from ._stub import NotBuilt
+from .events import Emitter
 from .models import AppModel, Component, DataCount, DataMove
 
 Direction = Literal["aws->leaseweb", "leaseweb->aws"]
@@ -47,25 +48,28 @@ class MissingAdapter(RuntimeError):
 
 
 def leaseweb_side(env: dict[str, str]) -> Side:
-    """Uses the same adapters the migrated app uses (kv: B, storage: C, queue: A)."""
-    for k, v in env.items():  # adapters read their connection settings from the environment
-        os.environ[k] = v
+    """Uses the same adapters the migrated app uses (kv: B, queue: A). Connection settings come from
+    `env` directly; the engine's own os.environ is never modified (L17)."""
+    from botocore.config import Config
+
     from sovereign_sdk import queue
     try:
         from sovereign_sdk import kv
-    except ImportError as e:
-        raise MissingAdapter("sovereign_sdk.kv (Postgres adapter, task B5) is not available yet") from e
-    try:
-        from sovereign_sdk.storage import s3_client
-    except ImportError:  # fallback until storage.py lands
-        def s3_client():
-            from botocore.config import Config
-            return boto3.client("s3", endpoint_url=env["S3_ENDPOINT_URL"], region_name="us-east-1",
-                                aws_access_key_id=env["S3_ACCESS_KEY_ID"],
-                                aws_secret_access_key=env["S3_SECRET_ACCESS_KEY"],
-                                config=Config(s3={"addressing_style": "path"}))
-    store = kv.resource()
-    return Side("leaseweb", env, table=store.Table, s3=s3_client, queue=queue.Queue, wants_decimal=True)
+        try:
+            store = kv.resource(env.get("DATABASE_URL"))
+        except TypeError:  # an adapter version whose resource() takes no URL
+            store = kv.resource()
+    except (ImportError, NotBuilt) as e:
+        raise MissingAdapter("sovereign_sdk.kv (Postgres adapter, task B5) is not built yet") from e
+
+    def s3_client():
+        # same settings as sovereign_sdk.storage.s3_client(), but from `env`, not os.environ
+        return boto3.client("s3", endpoint_url=env["S3_ENDPOINT_URL"], region_name=env.get("S3_REGION", "us-east-1"),
+                            aws_access_key_id=env["S3_ACCESS_KEY_ID"],
+                            aws_secret_access_key=env["S3_SECRET_ACCESS_KEY"],
+                            config=Config(s3={"addressing_style": "path"}))
+    return Side("leaseweb", env, table=store.Table, s3=s3_client,
+                queue=lambda: queue.Queue(url=env["AMQP_URL"]), wants_decimal=True)
 
 
 # ---------------------------------------------------------------- canonical form
@@ -183,28 +187,34 @@ def move_queue(c: Component, src: Side, dst: Side) -> DataCount:
 MOVERS = {"kv_table": move_table, "object_store": move_objects, "queue": move_queue}
 
 
-def move(pam: AppModel, direction: Direction, aws_env: dict[str, str], lw_env: dict[str, str],
+def move(pam: AppModel, direction: Direction, src_env: dict[str, str], dst_env: dict[str, str],
          emit: Emitter | None = None, sides: tuple[Side, Side] | None = None) -> DataMove:
-    """Copy every data component in `direction`. `sides` overrides (src, dst) for tests."""
-    emit = emit or null_emitter()
+    """Copy every data component from src to dst. `sides` overrides the (src, dst) handles for tests."""
+    def say(message: str, level: str = "info", **data) -> None:
+        if emit is not None:
+            emit.emit("data", message, level, direction=direction, **data)
+
     if sides is None:
-        aws, lw = aws_side(aws_env), leaseweb_side(lw_env)
-        sides = (aws, lw) if direction == "aws->leaseweb" else (lw, aws)
+        if direction == "aws->leaseweb":
+            sides = (aws_side(src_env), leaseweb_side(dst_env))
+        elif direction == "leaseweb->aws":
+            sides = (leaseweb_side(src_env), aws_side(dst_env))
+        else:
+            raise ValueError(f"unknown direction {direction!r}")
     src, dst = sides
     counts: list[DataCount] = []
     for c in pam.components:
         mover = MOVERS.get(c.kind)
         if mover is None:
             continue
-        emit("data", f"copying {c.id} ({c.kind}) {direction}")
+        say(f"copying {c.id} ({c.kind})")
         try:
             dc = mover(c, src, dst)
         except Exception as e:  # report, don't crash the run
             dc = DataCount(component_id=c.id, kind=c.kind, source_count=0, target_count=0,
                            checksum_match=False, notes=[f"copy failed: {type(e).__name__}: {e}"])
         ok = dc.source_count == dc.target_count and dc.checksum_match is not False
-        emit("data", f"{c.id}: {dc.source_count} -> {dc.target_count}, checksum "
-                     f"{'OK' if dc.checksum_match else 'MISMATCH'}",
-             level="success" if ok else "warning", count=dc.model_dump())
+        say(f"{c.id}: {dc.source_count} -> {dc.target_count}, checksum "
+            f"{'OK' if dc.checksum_match else 'MISMATCH'}", "success" if ok else "warning", count=dc)
         counts.append(dc)
     return DataMove(direction=direction, counts=counts)

@@ -4,6 +4,8 @@ from pathlib import Path
 import boto3
 import pytest
 
+pytestmark = pytest.mark.integration  # needs the lab (moto)
+
 from boomerang import lab, provisioner_aws, verifier
 from boomerang.models import AppModel
 

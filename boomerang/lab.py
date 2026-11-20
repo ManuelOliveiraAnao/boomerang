@@ -1,4 +1,6 @@
-"""The lab: fake AWS (moto) on 127.0.0.1:4566, plus optional services for adapter tests.
+"""The lab: fake AWS (moto) on 127.0.0.1:4566, plus optional services for adapter tests. Owner A, task A1.
+
+Contract with C (docs/15 L5): up(), down(), status() -> bool, reset().
 
 Backends:
   docker  -> infra/lab.compose.yml (moto container; `adapters` profile adds Postgres + RabbitMQ)
@@ -142,7 +144,18 @@ def _port_open(port: int) -> bool:
         return s.connect_ex((HOST, port)) == 0
 
 
-def status() -> dict[str, bool]:
+def status() -> bool:
+    """True when moto answers on 127.0.0.1:4566 (C's CLI and pipeline use this)."""
+    return moto_ready()
+
+
+def reset() -> None:
+    """Wipe all fake AWS state (used by the baseline and the round trip, docs/15 L5)."""
+    reset_moto()
+
+
+def services() -> dict[str, bool]:
+    """Per-service view for humans and tests."""
     return {
         "moto": moto_ready(),
         "test-postgres": _port_open(55432),

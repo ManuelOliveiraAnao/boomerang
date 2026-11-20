@@ -1,6 +1,8 @@
 import boto3
 import pytest
 
+pytestmark = pytest.mark.integration  # needs the lab (moto)
+
 from boomerang import lab
 
 
@@ -12,7 +14,7 @@ def running_lab():
 
 
 def test_moto_reachable(running_lab):
-    assert lab.status()["moto"] is True
+    assert lab.status() is True
 
 
 def test_aws_env_works_with_boto3(running_lab, monkeypatch):
@@ -57,7 +59,8 @@ def test_auto_backend_picks_process_without_docker(monkeypatch):
 
 def test_down_then_up_restarts_moto():
     # restore whatever was running, so later tests (and teammates' tests) keep their databases
-    had_adapters = lab.status()["test-postgres"] and lab.status()["test-rabbitmq"]
+    svc = lab.services()
+    had_adapters = svc["test-postgres"] and svc["test-rabbitmq"]
     try:
         lab.up()
         lab.down()
@@ -75,8 +78,14 @@ def test_wait_for_moto_times_out(monkeypatch):
         lab.wait_for_moto(timeout_s=0.5)
 
 
-def test_status_reports_every_service():
-    assert set(lab.status()) == {"moto", "test-postgres", "test-rabbitmq", "docker"}
+def test_reset_is_c_contract_alias():
+    lab.up()
+    lab.reset()
+    assert lab.status() is True
+
+
+def test_services_reports_every_service():
+    assert set(lab.services()) == {"moto", "test-postgres", "test-rabbitmq", "docker"}
 
 
 def test_compose_file_is_valid_yaml_with_expected_services():

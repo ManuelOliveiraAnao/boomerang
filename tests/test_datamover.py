@@ -29,6 +29,7 @@ def _by_id(move):
     return {c.component_id: c for c in move.counts}
 
 
+@pytest.mark.integration
 def test_forward_move_counts_and_checksums(two_sides):
     src_env, dst_env, src, dst = two_sides
     result = datamover.move(PAM, "aws->leaseweb", src_env, dst_env, sides=(src, dst))
@@ -45,6 +46,7 @@ def test_forward_move_counts_and_checksums(two_sides):
     assert provisioner_aws.counts_shoplite(src_env)["order_events"] == 0  # drained
 
 
+@pytest.mark.integration
 def test_round_trip_brings_back_new_data(two_sides):
     src_env, dst_env, src, dst = two_sides
     datamover.move(PAM, "aws->leaseweb", src_env, dst_env, sides=(src, dst))
@@ -60,6 +62,7 @@ def test_round_trip_brings_back_new_data(two_sides):
     assert item["total_cents"] == 100
 
 
+@pytest.mark.integration
 def test_detects_mismatch_when_target_has_extra_rows(two_sides):
     src_env, dst_env, src, dst = two_sides
     dst.table(dst_env["ORDERS_TABLE"]).put_item(Item={"order_id": "stale", "customer_id": "x"})
@@ -67,6 +70,7 @@ def test_detects_mismatch_when_target_has_extra_rows(two_sides):
     assert c["orders"].target_count == 26 and c["orders"].source_count == 25
 
 
+@pytest.mark.integration
 def test_copy_failure_is_reported_not_raised(two_sides):
     src_env, dst_env, src, dst = two_sides
     bad_env = dict(dst_env, RECEIPTS_BUCKET="no-such-bucket")
@@ -86,6 +90,7 @@ def test_normalize_and_to_dynamo():
 
 
 # ---------------------------------------------------------------- added
+@pytest.mark.integration
 def test_content_type_and_metadata_are_copied(two_sides):
     src_env, dst_env, src, dst = two_sides
     s3 = src.s3()
@@ -96,6 +101,7 @@ def test_content_type_and_metadata_are_copied(two_sides):
     assert obj["ContentType"] == "text/plain" and obj["Metadata"] == {"origin": "pos-7"}
 
 
+@pytest.mark.integration
 def test_empty_source_moves_nothing_and_is_ok(two_sides):
     _, dst_env, _, dst = two_sides
     lab.reset_moto()
@@ -106,6 +112,7 @@ def test_empty_source_moves_nothing_and_is_ok(two_sides):
     assert all(c.source_count == 0 == c.target_count for c in result.counts) and result.ok
 
 
+@pytest.mark.integration
 def test_moving_twice_is_idempotent_for_tables_and_objects(two_sides):
     src_env, dst_env, src, dst = two_sides
     datamover.move(PAM, "aws->leaseweb", src_env, dst_env, sides=(src, dst))
@@ -114,6 +121,7 @@ def test_moving_twice_is_idempotent_for_tables_and_objects(two_sides):
     assert again["order_events"].source_count == 0  # queue was drained the first time
 
 
+@pytest.mark.integration
 def test_floats_become_decimals_for_dynamodb(two_sides):
     src_env, dst_env, src, dst = two_sides
 
@@ -204,6 +212,7 @@ def test_table_content_mismatch_is_detected():
     assert dc.source_count == dc.target_count == 1 and dc.checksum_match is False
 
 
+@pytest.mark.integration
 @pytest.mark.slow
 def test_real_s3_pagination_over_1000_objects(two_sides):
     """S3 returns at most 1000 keys per page; make sure the copy doesn't stop at 1000."""
@@ -216,8 +225,37 @@ def test_real_s3_pagination_over_1000_objects(two_sides):
 
 
 def test_leaseweb_side_without_kv_adapter_is_a_clear_error():
-    import importlib.util
-    if importlib.util.find_spec("sovereign_sdk.kv") is not None:
-        pytest.skip("kv adapter exists now")
+    from sovereign_sdk import kv
+    try:
+        kv.resource()
+    except Exception as e:
+        if type(e).__name__ != "NotBuilt":
+            pytest.skip("B's real kv adapter is present")
+    else:
+        pytest.skip("B's real kv adapter is present")
     with pytest.raises(datamover.MissingAdapter, match="B5"):
         datamover.leaseweb_side({"AMQP_URL": "amqp://x"})
+
+
+def test_direction_picks_the_right_adapters(monkeypatch):
+    made = []
+    monkeypatch.setattr(datamover, "aws_side", lambda env: made.append(("aws", env["who"])) or "AWS")
+    monkeypatch.setattr(datamover, "leaseweb_side", lambda env: made.append(("lw", env["who"])) or "LW")
+    empty = PAM.model_copy(update={"components": []})
+    datamover.move(empty, "aws->leaseweb", {"who": "src"}, {"who": "dst"})
+    assert made == [("aws", "src"), ("lw", "dst")]
+    made.clear()
+    datamover.move(empty, "leaseweb->aws", {"who": "src"}, {"who": "dst"})
+    assert made == [("lw", "src"), ("aws", "dst")]
+    with pytest.raises(ValueError):
+        datamover.move(empty, "sideways", {}, {})
+
+
+@pytest.mark.integration
+def test_move_emits_data_events(two_sides):
+    from boomerang.events import Emitter
+    src_env, dst_env, src, dst = two_sides
+    events = []
+    datamover.move(PAM, "aws->leaseweb", src_env, dst_env, Emitter("t", [events.append]), sides=(src, dst))
+    assert events and all(e.stage == "data" for e in events)
+    assert any(e.level == "success" and "orders: 25 -> 25" in e.message for e in events)

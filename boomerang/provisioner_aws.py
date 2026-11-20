@@ -1,4 +1,8 @@
-"""Create an app's AWS resources in the fake AWS (moto) from its PAM, and seed demo data."""
+"""Create an app's AWS resources in the fake AWS (moto) from its PAM, and seed demo data. Owner A, task A3.
+
+Contract with C (docs/15 L5/L17): provision(pam, emit) and seed(pam, count, emit). Seeding uses plain
+boto3: the engine never imports the scanned app.
+"""
 from __future__ import annotations
 
 import json
@@ -11,6 +15,13 @@ from botocore.exceptions import ClientError
 
 from . import lab
 from .models import AppModel, Component
+
+NAMES_FILE = lab.STATE_DIR / "aws_names.json"  # last provisioned env vars -> name (read by verifier.aws_env)
+
+
+def _emit(emit, message: str, level: str = "info", **data) -> None:
+    if emit is not None:
+        emit.emit("verify", message, level, step="provision", **data)
 
 
 def _clients(env: dict[str, str]):
@@ -84,8 +95,9 @@ def _create_queue(sqs, c: Component, name: str) -> None:
     sqs.create_queue(QueueName=name, Attributes=attributes)
 
 
-def provision(pam: AppModel, *, run_tag: str | None = None) -> dict[str, str]:
-    """Create bucket/table/queue components in moto. Idempotent. Returns the app's env."""
+def provision(pam: AppModel, emit=None, *, run_tag: str | None = None) -> dict[str, str]:
+    """Create bucket/table/queue components in moto. Idempotent. Returns the app's env
+    (C's contract only needs the side effect; the return value is a convenience)."""
     names = resource_names(pam, run_tag)
     env = app_env(pam, names)
     s3, ddb, sqs, _ = _clients(env)
@@ -103,7 +115,27 @@ def provision(pam: AppModel, *, run_tag: str | None = None) -> dict[str, str]:
             _create_table(ddb, c, name)
         elif c.kind == "queue":
             _create_queue(sqs, c, name)
+    NAMES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    NAMES_FILE.write_text(json.dumps({k: v for k, v in env.items() if k not in lab.aws_env()}, indent=2),
+                          encoding="utf-8")
+    _emit(emit, f"fake AWS ready: {', '.join(names.values())}", "success", names=names)
     return env
+
+
+def last_names() -> dict[str, str]:
+    """Name env vars of the last provision() (e.g. ORDERS_TABLE=orders)."""
+    try:
+        return json.loads(NAMES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def seed(pam: AppModel, count: int = 25, emit=None, *, pending: int = 3) -> dict[str, int]:
+    """`count` ShopLite orders with receipts; `pending` of them still have a message in the queue."""
+    env = app_env(pam, resource_names(pam))
+    counts = seed_shoplite(env, n_orders=count, pending=pending)
+    _emit(emit, f"seeded {counts}", "success", counts=counts)
+    return counts
 
 
 def seed_shoplite(env: dict[str, str], n_orders: int = 25, pending: int = 3, rng_seed: int = 7) -> dict[str, int]:

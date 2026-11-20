@@ -148,15 +148,65 @@ def test_health_check_fails_cleanly():
     assert not c.ok and "health check failed" in c.detail
 
 
-def test_freeze_and_reset_issue_the_right_compose_commands(monkeypatch):
+def test_service_and_reset_issue_the_right_compose_commands(monkeypatch):
     monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
     fake = FakeDocker()
-    verifier.freeze(MIN, run=fake)
-    assert fake.calls[-1][-3:] == ["stop", "api", "worker"]
+    verifier.stop_service(MIN, "worker", run=fake)
+    assert fake.calls[-1][-2:] == ["stop", "worker"]
+    verifier.start_service(MIN, "worker", run=fake)
+    assert fake.calls[-1][-2:] == ["start", "worker"]
     verifier.reset_stack(MIN, run=fake)
     assert ["down", "-v"] == fake.calls[-2][-2:] and "up" in fake.calls[-1]
 
 
+def test_compose_gets_secrets_env_file(tmp_path):
+    shutil.copytree(MIN, tmp_path / "lw")
+    (tmp_path / "lw" / "secrets.env").write_text("POSTGRES_PASSWORD=s3cret\n", encoding="utf-8")
+    cmd = verifier._compose(tmp_path / "lw")
+    files = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--env-file"]
+    assert [Path(f).name for f in files] == [".env.example", "secrets.env"]  # secrets win
+
+
+def test_verify_stops_worker_during_tests_and_restarts_it(monkeypatch, health_server):
+    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+    fake = FakeDocker()
+    verifier.verify(MIN, run=fake, health_url=health_server)
+    tail = [c[-2:] for c in fake.calls if c[0] == "docker"][-2:]
+    assert tail == [["stop", "worker"], ["start", "worker"]]
+
+
+def test_run_tests_uses_the_apps_own_tests_folder(tmp_path):
+    d = _app(tmp_path, "def test_ok():\n    pass\n")
+    r = verifier.run_tests(d, {}, "aws", 0)
+    assert r.ok and r.total == 1 and r.attempt == 0
+
+
+def test_test_env_is_an_allowlist(tmp_path, monkeypatch):
+    """L8: the AI-edited app never sees our API key or AWS credentials."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "real-aws-secret")
+    monkeypatch.setenv("SOME_RANDOM_VAR", "x")
+    d = _app(tmp_path, "import os\n\ndef test_env():\n"
+                       "    for k in ('ANTHROPIC_API_KEY', 'AWS_SECRET_ACCESS_KEY', 'SOME_RANDOM_VAR'):\n"
+                       "        assert k not in os.environ, k\n"
+                       "    assert os.environ['PYTHONUTF8'] == '1'\n"
+                       "    assert os.environ['PYTHONDONTWRITEBYTECODE'] == '1'\n")
+    r = verifier.run_tests(d, {}, "leaseweb", 1)
+    assert r.ok, r.output_tail
+
+
+def test_leaseweb_env_is_laptop_env():
+    assert verifier.leaseweb_env(MIN) == verifier.laptop_env(MIN)
+
+
+def test_aws_env_includes_last_provisioned_names(monkeypatch):
+    from boomerang import provisioner_aws
+    monkeypatch.setattr(provisioner_aws, "last_names", lambda: {"ORDERS_TABLE": "orders"})
+    env = verifier.aws_env()
+    assert env["ORDERS_TABLE"] == "orders" and env["AWS_ENDPOINT_URL"] == "http://127.0.0.1:4566"
+
+
+@pytest.mark.integration
 @pytest.mark.skipif(not verifier.shutil.which("docker"), reason="needs Docker")
 def test_real_boot_of_minimal_stack():
     try:
@@ -239,9 +289,10 @@ def test_read_env_file_handles_quotes_comments_and_blank_lines(tmp_path):
 def test_verify_emits_one_event_per_check(monkeypatch, health_server):
     from boomerang.events import Emitter
     monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
-    em = Emitter("t")
-    verifier.verify(MIN, run=FakeDocker(), health_url=health_server, emit=em)
-    assert [e.data["check"]["name"] for e in em.events] == ["config", "boot", "schema", "tests", "health"]
+    events = []
+    verifier.verify(MIN, run=FakeDocker(), health_url=health_server, emit=Emitter("t", [events.append]))
+    assert [e.data["check"]["name"] for e in events] == ["config", "boot", "schema", "tests", "health"]
+    assert all(e.stage == "verify" for e in events)
 
 
 def test_verify_reports_failing_app_tests(tmp_path, monkeypatch, health_server):

@@ -1,0 +1,6 @@
+# Shell scripts and templates run inside Linux containers: always LF, even with core.autocrlf=true.
+*.sh text eol=lf
+*.j2 text eol=lf
+
+# Test fixtures keep their exact bytes on every machine (the CRLF tests build CRLF text themselves).
+tests/data/** -text

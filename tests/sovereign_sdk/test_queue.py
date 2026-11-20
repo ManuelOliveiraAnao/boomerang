@@ -30,7 +30,7 @@ def _rabbit_up() -> bool:
         return s.connect_ex(("127.0.0.1", 55672)) == 0
 
 
-@pytest.fixture(params=["fake", "rabbitmq"])
+@pytest.fixture(params=["fake", pytest.param("rabbitmq", marks=pytest.mark.integration)])
 def make(request):
     """Returns make(max_receive_count) -> (client, queue_url, name)."""
     created = []

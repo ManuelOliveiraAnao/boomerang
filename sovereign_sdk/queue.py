@@ -5,7 +5,7 @@ Mimics the boto3 SQS client calls ShopLite-style apps use:
 
 Semantics:
 - At-least-once: a received message stays unacked until delete_message.
-- Visibility timeout: unacked messages older than VisibilityTimeout are nacked (requeue) on the
+- Visibility timeout: unacked messages older than VisibilityTimeout are rejected (requeue) on the
   next call to this client, so they are delivered again. If the process dies, RabbitMQ requeues
   them when the connection closes.
 - Dead-letter queue: quorum queue `x-delivery-limit` + dead-letter routing to "<name>-dlq".
@@ -206,7 +206,9 @@ class Queue:
             for h in expired:
                 tag = self._inflight.pop(h)[0]
                 try:
-                    self._channel().basic_nack(delivery_tag=tag, requeue=True)
+                    # basic_reject, not basic_nack: RabbitMQ 4 quorum queues count rejects towards
+                    # x-delivery-limit, but a nack+requeue is redelivered forever (verified on 4.x).
+                    self._channel().basic_reject(delivery_tag=tag, requeue=True)
                 except _RECONNECT_ERRORS:
                     self._ch = None  # broker requeues everything unacked on that channel anyway
 

@@ -14,6 +14,16 @@ from sovereign_sdk import queue as q
 from tests.sovereign_sdk.fake_amqp import FakeBroker
 
 
+def _eventually(fn, timeout=3.0):
+    """RabbitMQ dead-letters asynchronously: poll until fn() is truthy."""
+    deadline = time.monotonic() + timeout
+    while True:
+        value = fn()
+        if value or time.monotonic() > deadline:
+            return value
+        time.sleep(0.1)
+
+
 def _rabbit_up() -> bool:
     with socket.socket() as s:
         s.settimeout(0.5)
@@ -113,7 +123,7 @@ def test_dead_letter_after_max_receives(make):
     c._expire()
     assert receives == 3
     assert c.depth(name) == 0
-    assert c.depth(q.dlq_name(name)) == 1
+    assert _eventually(lambda: c.depth(q.dlq_name(name)) == 1)
 
 
 def test_max_number_of_messages(make):
@@ -246,7 +256,8 @@ def test_dlq_receives_the_original_body(make):
             break
     c._expire()
     dlq_url = c.get_queue_url(QueueName=q.dlq_name(name))["QueueUrl"]
-    assert c.receive_message(QueueUrl=dlq_url)["Messages"][0]["Body"] == "poison-pill"
+    got = _eventually(lambda: c.receive_message(QueueUrl=dlq_url))
+    assert got["Messages"][0]["Body"] == "poison-pill"
 
 
 # ---------------------------------------------------------------- fake-only: connection loss

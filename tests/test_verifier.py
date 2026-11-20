@@ -77,7 +77,7 @@ def test_config_check_catches_bad_yaml(tmp_path):
     assert not verifier.check_config(tmp_path / "lw").ok
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash not available")
+@pytest.mark.skipif(not verifier.find_bash(), reason="no usable bash (Git Bash) available")
 def test_config_check_catches_bad_deploy_script(tmp_path):
     shutil.copytree(MIN, tmp_path / "lw")
     (tmp_path / "lw" / "deploy.sh").write_text("if then fi (\n", encoding="utf-8")
@@ -100,7 +100,7 @@ class FakeDocker:
 
     def __call__(self, cmd, **kw):
         self.calls.append(cmd)
-        if cmd[0] == "bash":
+        if Path(cmd[0]).stem.lower() == "bash":
             return subprocess.run(cmd, **kw)
         rc = 1 if (self.fail_up and "up" in cmd) else 0
         return subprocess.CompletedProcess(cmd, rc, stdout="svc  exited (1)", stderr="dependency failed" if rc else "")
@@ -219,7 +219,7 @@ def test_config_check_reports_compose_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
 
     def run(cmd, **kw):
-        if cmd[0] == "bash":
+        if Path(cmd[0]).stem.lower() == "bash":
             return subprocess.CompletedProcess(cmd, 0, "", "")
         return subprocess.CompletedProcess(cmd, 1, "", "service api: undefined volume")
     c = verifier.check_config(MIN, run=run)
@@ -251,3 +251,13 @@ def test_verify_reports_failing_app_tests(tmp_path, monkeypatch, health_server):
     v = verifier.verify(tmp_path / "lw", run=FakeDocker(), health_url=health_server)
     tests = next(c for c in v.checks if c.name == "tests")
     assert not tests.ok and tests.detail == "0/1 passed" and not v.ok
+
+
+def test_find_bash_skips_the_wsl_launcher(monkeypatch):
+    """On Windows the System32 bash.exe is WSL's launcher; it must never be picked."""
+    monkeypatch.setattr(verifier.os, "name", "nt")
+    monkeypatch.setattr(verifier.shutil, "which",
+                        lambda name: r"C:\WINDOWS\system32\bash.exe" if name == "bash" else None)
+    for var in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        monkeypatch.delenv(var, raising=False)
+    assert verifier.find_bash() is None

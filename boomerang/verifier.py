@@ -144,6 +144,27 @@ def _timed(name: str, fn) -> Check:
     return Check(name=name, ok=ok, detail=detail[:4000], duration_s=round(time.time() - start, 2))
 
 
+def find_bash() -> str | None:
+    """A bash that can check shell syntax. On Windows, C:\\Windows\\System32\\bash.exe is the WSL
+    launcher (it runs inside a Linux distro and fails if that distro has no bash, e.g. docker-desktop),
+    so prefer Git Bash."""
+    found = shutil.which("bash")
+    if os.name != "nt":
+        return found
+    candidates = []
+    git = shutil.which("git")
+    if git:  # ...\Git\cmd\git.exe -> ...\Git\bin\bash.exe
+        candidates.append(Path(git).resolve().parent.parent / "bin" / "bash.exe")
+    candidates += [Path(os.environ.get(v, "")) / "Git" / "bin" / "bash.exe"
+                   for v in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA") if os.environ.get(v)]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    if found and "system32" not in found.lower() and "windowsapps" not in found.lower():
+        return found
+    return None
+
+
 def check_config(leaseweb_dir: Path, run: Run = subprocess.run) -> Check:
     def body():
         d = Path(leaseweb_dir)
@@ -163,8 +184,9 @@ def check_config(leaseweb_dir: Path, run: Run = subprocess.run) -> Check:
         else:
             notes.append("compose config skipped (no docker)")
         if (d / "deploy.sh").exists():
-            if shutil.which("bash"):
-                p = run(["bash", "-n", str(d / "deploy.sh")], capture_output=True, text=True)
+            bash = find_bash()
+            if bash:
+                p = run([bash, "-n", str(d / "deploy.sh")], capture_output=True, text=True)
                 if p.returncode != 0:
                     return False, f"deploy.sh syntax error:\n{p.stderr}"
                 notes.append("deploy.sh syntax")

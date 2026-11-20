@@ -142,12 +142,10 @@ def incident(src: Source) -> dict[str, Any] | None:
     data = src.json("doctor")
     if data is None:
         return None
-    if "resolved_at" in data:
-        is_open = data["resolved_at"] is None
-    else:
-        applied = data.get("applied", [])
-        is_open = not (applied and applied[-1].get("ok"))
-    return {"incident": data, "open": is_open}
+    if "resolved_at" in data:                 # C's contract: set when a fix or a fresh diagnosis finds it healthy
+        return {"incident": data, "open": data["resolved_at"] is None}
+    applied = data.get("applied", [])
+    return {"incident": data, "open": not (applied and applied[-1].get("ok"))}   # older files: the last fix worked
 
 
 # ---------------------------------------------------------------- preview (demo data)

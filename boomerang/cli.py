@@ -61,6 +61,11 @@ def _handled() -> Iterator[None]:
         console.print(f"[red]❌ {escape(str(e))}[/red]")
         raise typer.Exit(EXIT_ERROR) from None
     except Exception as e:
+        from boomerang.llm import LLMError
+
+        if isinstance(e, LLMError):                 # LLMUnavailable / CacheMiss say what to do
+            console.print(f"[red]❌ {type(e).__name__}: {escape(str(e))}[/red]")
+            raise typer.Exit(EXIT_ERROR) from None
         if type(e).__name__ == "NotApproved":
             console.print(f"[red]❌ not approved: {escape(str(e))}[/red]")
             raise typer.Exit(EXIT_AWAITING) from None

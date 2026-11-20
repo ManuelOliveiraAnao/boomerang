@@ -65,6 +65,17 @@ def test_remote_ollama_host_warns(tmp_path):
         assert _load(tmp_path, {"OLLAMA_HOST": "localhost:11434"}).ollama_host == "http://localhost:11434"
 
 
+def test_leaseweb_location(tmp_path):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")                       # the badge already says where the model runs
+        s = _load(tmp_path, {"BOOMERANG_LLM_LOCATION": "Leaseweb", "BOOMERANG_MODEL": "qwen2.5-coder:32b",
+                             "OLLAMA_HOST": "http://127.0.0.1:11435"})
+    assert s.llm_location == "leaseweb"
+    assert s.llm_badge == "ollama · qwen2.5-coder:32b · Leaseweb (EU)"
+    with pytest.raises(ValueError, match="BOOMERANG_LLM_LOCATION"):
+        _load(tmp_path, {"BOOMERANG_LLM_LOCATION": "aws"})
+
+
 def test_env_example_parses_with_inline_comments():
     s = load_settings(environ={}, dotenv_path=REPO_ROOT / ".env.example")
     assert (s.provider, s.model, s.llm_mode, s.max_fix_attempts) == ("ollama", "qwen2.5-coder:7b", "record", 2)

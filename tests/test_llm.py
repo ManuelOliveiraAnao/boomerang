@@ -211,6 +211,13 @@ def test_ollama_not_running(ollama_client):
         _ask()
 
 
+def test_ollama_not_reachable_on_leaseweb_says_tunnel(ollama_client, monkeypatch):
+    _set(monkeypatch, BOOMERANG_LLM_LOCATION="leaseweb")
+    ollama_client.script = [ConnectionError("Failed to connect to Ollama")]
+    with pytest.raises(llm.LLMUnavailable, match="SSH tunnel.*BOOMERANG_LLM_PROVIDER=anthropic"):
+        _ask()
+
+
 def test_ollama_model_not_pulled(ollama_client):
     import ollama
 

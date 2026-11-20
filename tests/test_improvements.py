@@ -958,3 +958,90 @@ def test_delock_cache_contains_no_secrets_and_passes_democache_check(world, sour
     # Only problem possible here would be secrets.env not in a git repo (becomes a note) — never delock-cache.json
     assert not any(delock.DELOCK_CACHE in p for p in report.problems), report.problems
 
+
+# ============================================================================
+# 5. End-to-end integration: Doctor + partial migration + delock cache + UI
+# ============================================================================
+
+def test_doctor_move_back_integrates_with_delock_cache_and_ui_resolved_at(world, source, moves, llm, monkeypatch):
+    from boomerang import doctor
+    from boomerang.models import DoctorExplanation, Signal
+    from ui.components import doctor as doctor_ui
+    from ui.data import Source
+
+    # 1. Full migration passes and populates delock-cache.json (2 LLM calls)
+    summary = pipeline.migrate(source, yes=True, run_id="doc-e2e")
+    assert summary.status == "passed" and len(llm.calls) == 2
+    llm.calls.clear()
+
+    # 2. Simulate Postgres going down and run real Doctor orchestrator + real Doctor rules
+    down_signals = [
+        Signal(source="container", service="postgres", ok=False, detail="Exited (1)"),
+        Signal(source="probe", service="postgres", ok=False, detail="127.0.0.1:5432: connection refused"),
+        Signal(source="health", service="api", ok=False, detail="HTTP 500"),
+        Signal(source="container", service="rabbitmq", ok=True, detail="Up"),
+        Signal(source="container", service="seaweedfs", ok=True, detail="Up"),
+        Signal(source="container", service="api", ok=True, detail="Up"),
+        Signal(source="container", service="worker", ok=True, detail="Up"),
+    ]
+    healthy_hybrid_signals = [
+        Signal(source="container", service="postgres", ok=False, detail="not created"),  # ignored in hybrid scope!
+        Signal(source="probe", service="postgres", ok=False, detail="127.0.0.1:5432: refused"),  # ignored in hybrid!
+        Signal(source="container", service="rabbitmq", ok=True, detail="Up"),
+        Signal(source="container", service="seaweedfs", ok=True, detail="Up"),
+        Signal(source="container", service="api", ok=True, detail="Up"),
+        Signal(source="container", service="worker", ok=True, detail="Up"),
+        Signal(source="health", service="api", ok=True, detail="GET /health -> 200"),
+    ]
+    state = {"signals": down_signals}
+    monkeypatch.setattr("boomerang.doctor.signals.collect", lambda lw: list(state["signals"]))
+    llm.responses["doctor"] = DoctorExplanation(explanation="Postgres stopped; move orders back to AWS.")
+
+    incident = doctor.run("doc-e2e")
+    assert incident is not None
+    assert incident.diagnosis.rule == "db_down"
+    assert incident.resolved_at is None
+    assert any(a.id == "move_back" and a.target == "orders" for a in incident.diagnosis.actions)
+
+    # UI sees the incident as open
+    src = Source(kind="run", label="doc-e2e", path=root_of("doc-e2e"))
+    assert doctor_ui.incident(src)["open"] is True  # type: ignore[index]
+
+    # 3. Doctor applies move_back orders via real doctor.actions.apply -> real pipeline.move_back!
+    #    After move_back, postgres is no longer self-hosted so doctor.rules.relevant ignores postgres signals.
+    state["signals"] = healthy_hybrid_signals
+    llm.calls.clear()
+    resolved = doctor.fix("doc-e2e", "move_back", "orders", by="ui")
+
+    assert resolved.resolved_at is not None
+    assert resolved.applied[-1].ok is True
+    assert llm.calls == []  # 0 extra LLM calls (orders went back to AWS; queue+storage are 1:1)
+    updated_run = pipeline.load_run("doc-e2e")
+    assert updated_run.scope is not None and updated_run.scope.selfhosted == ["order_events", "receipts"]
+
+    # UI now sees the incident as resolved (open == False)
+    assert doctor_ui.incident(src)["open"] is False  # type: ignore[index]
+
+
+def test_doctor_ui_incident_open_uses_resolved_at(tmp_path):
+    from ui.components import doctor as doctor_ui
+    from ui.data import Source
+
+    run_dir = tmp_path / "r-ui"
+    run_dir.mkdir()
+    src = Source(kind="run", label="r-ui", path=run_dir)
+    base = json.loads((Path(__file__).resolve().parents[1] / "fixtures" / "doctor-demo.json").read_text(encoding="utf-8"))
+
+    # Case 1: fix succeeded (ok=True) BUT stack still failing -> resolved_at is None -> still OPEN
+    still_open = {**base, "resolved_at": None, "applied": [
+        {"action": base["diagnosis"]["actions"][0], "by": "ui", "at": 1.0, "ok": True, "detail": "restarted"}
+    ]}
+    (run_dir / "doctor.json").write_text(json.dumps(still_open), encoding="utf-8")
+    assert doctor_ui.incident(src)["open"] is True  # type: ignore[index]
+
+    # Case 2: manually resolved on re-diagnose (applied=[]) -> resolved_at set -> RESOLVED (open=False)
+    auto_resolved = {**base, "resolved_at": 1795186000.0, "applied": []}
+    (run_dir / "doctor.json").write_text(json.dumps(auto_resolved), encoding="utf-8")
+    assert doctor_ui.incident(src)["open"] is False  # type: ignore[index]
+
+

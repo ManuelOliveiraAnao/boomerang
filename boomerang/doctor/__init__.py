@@ -104,6 +104,8 @@ def fix(run_id: str, action_id: str, target: str, *, by: str, emit: Emitter | No
         raise
     _record(root, incident, action, by, ok, detail)
 
+    from boomerang import pipeline
+    summary = pipeline.load_run(run_id)          # move_back updates run.json's scope: re-read before filtering signals
     failing = [s for s in _relevant(_collect(root / "leaseweb"), _read_pam(root), summary) if not s.ok]
     if failing:
         names = ", ".join(sorted({f"{s.service} ({s.source})" for s in failing}))

@@ -75,8 +75,11 @@ def _decode_item(value) -> dict:
 
 def ddl(component: object) -> str:
     """Generate the Postgres DDL for one DynamoDB-compatible table component."""
-    table_name = _component_value(component, "resource_name") or _component_value(component, "id")
-    table_name = _identifier(str(table_name).replace("-", "_"))
+    resource_name = _component_value(component, "resource_name")
+    if resource_name is not None and str(resource_name).strip() == "":
+        raise UnsupportedFeature("A KV table must have a resource name")
+    table_name = resource_name or _component_value(component, "id")
+    table_name = _identifier(str(table_name))
     partition_key = _key_attr(component, "partition_key")
     sort_key = _key_attr(component, "sort_key")
     if partition_key is None:

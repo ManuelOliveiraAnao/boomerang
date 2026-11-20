@@ -69,7 +69,7 @@ Merged B's `member-b-partial-migration` (`e85c28f`: `Scope`/`ScopeStep` models, 
 
 Full scope (the default) = the old behaviour; the other roles are called exactly as before. Lock-in before/after
 are scored with an empty scope (B's `score()` now excludes the scope; its default would drop every component).
-Tests: `tests/test_partial_migration.py` (15), `tests/test_cost.py`, `tests/test_datamover.py`, `tests/test_verifier.py`.
+Tests: `tests/test_partial_migration.py` (29), `tests/test_cost.py`, `tests/test_datamover.py`, `tests/test_verifier.py` (**493 passed, 23 skipped** across the full unit test suite).
 Checked in the browser: unchecking `order_events` → "Approve: move 2 of 3" → `approval.json` scope `[orders, receipts]` → `execute` uses it.
 
 **Not done / limits:** a real hybrid run (lab + Docker:

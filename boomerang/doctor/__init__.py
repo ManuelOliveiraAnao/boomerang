@@ -92,9 +92,7 @@ def fix(run_id: str, action_id: str, target: str, *, by: str, emit: Emitter | No
         offered = ", ".join(f"{a.id} {a.target}" for a in incident.diagnosis.actions) or "none"
         raise DoctorError(f"`{action_id} {target}` is not one of this incident's fixes ({offered})")
 
-    emit.emit("doctor", f"fix: {action.label} · approved by {by}", "info", action=action.id, target=action.target,
-              risk=action.risk, by=by)
-    try:
+    try:                                         # actions.apply() emits "<label> (approved by …)" and the outcome
         result = _apply(run_id, root / "leaseweb", action, by=by, emit=emit)
         ok, detail = bool(result.get("ok")), str(result.get("detail", ""))
     except Exception as e:  # recorded, then raised: the incident keeps what was tried
@@ -105,8 +103,6 @@ def fix(run_id: str, action_id: str, target: str, *, by: str, emit: Emitter | No
         emit.emit("doctor", f"fix failed: {action.label}: {detail}", "error", action=action.id, target=action.target)
         raise
     _record(root, incident, action, by, ok, detail)
-    emit.emit("doctor", f"{action.label}: {'done' if ok else 'failed'}{f' · {detail}' if detail else ''}",
-              "success" if ok else "error", action=action.id, target=action.target, ok=ok)
 
     failing = [s for s in _relevant(_collect(root / "leaseweb"), _read_pam(root), summary) if not s.ok]
     if failing:
@@ -169,7 +165,10 @@ def load(run_id: str) -> Incident | None:
 def break_service(run_id: str, service: str) -> None:
     """Demo only: stop one service of the run's lab stack (A's ``actions.break_service`` refuses anything else)."""
     _summary, root = _precondition(run_id)
-    _module("actions").break_service(root / "leaseweb", service)
+    try:
+        _module("actions").break_service(root / "leaseweb", service)
+    except (PermissionError, ValueError) as e:   # remote Docker / not the lab stack / unknown service
+        raise DoctorError(str(e)) from None
 
 
 # ---------- A's and B's modules, imported when needed ----------

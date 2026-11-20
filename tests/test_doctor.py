@@ -310,3 +310,15 @@ def test_run_with_the_real_rules(run_root, monkeypatch, fake_llm):
     d = incident.diagnosis
     assert (d.rule, d.component_id, d.severity) == ("db_down", "orders", "down")
     assert (d.actions[0].id, d.actions[0].target) == ("restart_service", "postgres")
+
+
+@pytest.mark.parametrize("error", [PermissionError("doctor break only runs on the local verify stack"),
+                                   ValueError("unknown service 'nginx'")])
+def test_cli_break_refusal_is_a_clear_message(run_root, monkeypatch, error):
+    class Refusing:
+        @staticmethod
+        def break_service(leaseweb_dir, service):
+            raise error
+    monkeypatch.setattr(doctor, "_module", lambda name: Refusing)
+    result = runner.invoke(app, ["doctor", "break", RUN, "postgres"])
+    assert result.exit_code == EXIT_ERROR and str(error) in result.output and result.exception is not None

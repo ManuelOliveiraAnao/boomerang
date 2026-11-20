@@ -53,7 +53,9 @@ def _key_attr(component: object, name: str) -> str | None:
 
 def _decimal_default(value):
     if isinstance(value, Decimal):
-        return str(value)
+        if value == value.to_integral_value():
+            return int(value)
+        return float(value)
     raise TypeError(f"{type(value).__name__} is not JSON serializable")
 
 

@@ -129,3 +129,103 @@ def test_sort_key_round_trip(table):
     ) == {}
     kv.execute(f'DROP TABLE IF EXISTS "{table_name}"')
     kv.commit()
+
+
+def test_ddl_rejects_missing_partition_key():
+    with pytest.raises(UnsupportedFeature):
+        ddl(
+            {
+                "id": "invalid",
+                "resource_name": "invalid",
+                "partition_key": None,
+                "sort_key": None,
+                "indexes": [],
+            }
+        )
+
+
+def test_ddl_rejects_invalid_identifier():
+    with pytest.raises(UnsupportedFeature):
+        ddl(
+            {
+                "id": "invalid",
+                "resource_name": "orders; DROP TABLE users",
+                "partition_key": {"name": "order_id", "type": "S"},
+                "sort_key": None,
+                "indexes": [],
+            }
+        )
+
+
+def test_ddl_includes_multiple_gsi_indexes():
+    ddl_text = ddl(
+        {
+            "id": "orders",
+            "resource_name": "orders",
+            "partition_key": {"name": "order_id", "type": "S"},
+            "sort_key": None,
+            "indexes": [
+                {
+                    "name": "customer_id-index",
+                    "partition_key": {"name": "customer_id", "type": "S"},
+                    "sort_key": None,
+                },
+                {
+                    "name": "status-created-index",
+                    "partition_key": {"name": "status", "type": "S"},
+                    "sort_key": {"name": "created_at", "type": "S"},
+                },
+            ],
+        }
+    )
+
+    assert 'CREATE INDEX IF NOT EXISTS "customer_id_index"' in ddl_text
+    assert 'CREATE INDEX IF NOT EXISTS "status_created_index"' in ddl_text
+    assert '"created_at" TEXT' in ddl_text
+
+
+def test_attribute_exists_missing_item_is_rejected(table):
+    with pytest.raises(ConditionalCheckFailedException):
+        table.put_item(
+            {"order_id": "missing"},
+            ConditionExpression="attribute_exists(order_id)",
+        )
+
+
+def test_update_rejects_unsupported_expression(table):
+    table.put_item({"order_id": "order-1", "status": "pending"})
+
+    with pytest.raises(UnsupportedFeature):
+        table.update_item(
+            {"order_id": "order-1"},
+            "ADD quantity :one",
+            ExpressionAttributeValues={":one": 1},
+        )
+
+
+def test_update_rejects_unknown_placeholder(table):
+    table.put_item({"order_id": "order-1", "status": "pending"})
+
+    with pytest.raises(UnsupportedFeature):
+        table.update_item(
+            {"order_id": "order-1"},
+            "SET status = :missing",
+            ExpressionAttributeValues={},
+        )
+
+
+def test_query_rejects_invalid_key_expression(table):
+    with pytest.raises(UnsupportedFeature):
+        table.query("customer_id = :customer")
+
+
+def test_decimal_values_round_trip(table):
+    table.put_item(
+        {
+            "order_id": "decimal-order",
+            "total_cents": Decimal("1234"),
+        }
+    )
+
+    item = table.get_item({"order_id": "decimal-order"})["Item"]
+    assert item["total_cents"] == Decimal("1234")

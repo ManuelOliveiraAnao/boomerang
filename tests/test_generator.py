@@ -105,3 +105,79 @@ def test_generator_schema_contains_primary_key(fixture_value, expected_column):
     )
     assert expected_column in ddl_text
     assert "PRIMARY KEY (\"order_id\")" in ddl_text
+
+
+def test_generated_files_do_not_contain_test_secret_values(tmp_path):
+    pam = json.loads(
+        (Path(__file__).parents[1] / "fixtures" / "pam.aws.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    secret_values = {
+        "POSTGRES_PASSWORD": "postgres-test-password",
+        "RABBITMQ_PASSWORD": "rabbitmq-test-password",
+        "SEAWEEDFS_ACCESS_KEY": "access-test-key",
+        "SEAWEEDFS_SECRET_KEY": "secret-test-key",
+    }
+
+    render(pam, secret_values, tmp_path)
+
+    for path in tmp_path.rglob("*"):
+        if not path.is_file() or path.name == "secrets.env":
+            continue
+        relative_path = path.relative_to(tmp_path).as_posix()
+        if relative_path in {
+            "rabbitmq/definitions.json",
+            "seaweedfs/s3.json",
+        }:
+            continue
+        if path.suffix not in {
+            ".yml",
+            ".yaml",
+            ".json",
+            ".j2",
+            ".md",
+            ".txt",
+            ".sh",
+            ".example",
+            ".py",
+            "",
+        }:
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        assert "postgres-test-password" not in content
+        assert "rabbitmq-test-password" not in content
+        assert "access-test-key" not in content
+        assert "secret-test-key" not in content
+
+
+def test_generate_secrets_repeated_calls_do_not_reuse_values():
+    first = generate_secrets()
+    second = generate_secrets()
+
+    assert first.keys() == second.keys()
+    assert all(first[name] != second[name] for name in first)
+
+
+def test_generated_schema_contains_index_for_gsi(tmp_path):
+    pam = json.loads(
+        (Path(__file__).parents[1] / "fixtures" / "pam.aws.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    secrets = {
+        "POSTGRES_PASSWORD": "postgres-password",
+        "RABBITMQ_PASSWORD": "rabbit-password",
+        "SEAWEEDFS_ACCESS_KEY": "access-key",
+        "SEAWEEDFS_SECRET_KEY": "secret-key",
+    }
+
+    render(pam, secrets, tmp_path)
+    schema = (tmp_path / "schema.sql").read_text(encoding="utf-8")
+
+    assert 'CREATE TABLE IF NOT EXISTS "orders"' in schema
+    assert 'CREATE INDEX IF NOT EXISTS "customer_id_index"' in schema
+    assert '"customer_id" TEXT' in schema

@@ -113,3 +113,99 @@ def test_lockin_score_weights_components_and_usage():
     }
 
     assert score(pam) == 90 * 2 + 35
+
+
+def test_assessment_emit_reports_result():
+    events = []
+
+    def emit(stage, message, level="info", **data):
+        events.append((stage, message, level, data))
+
+    assessment = assess(
+        {
+            "components": [
+                {
+                    "id": "orders",
+                    "kind": "kv_table",
+                    "provider": "aws.dynamodb",
+                    "features": ["gsi"],
+                    "usages": [],
+                }
+            ]
+        },
+        emit=emit,
+    )
+
+    assert assessment["overall"] == "amber"
+    assert events == [
+        (
+            "assess",
+            "Traffic-light assessment completed",
+            "success",
+            {"findings": 1},
+        )
+    ]
+
+
+def test_assessment_empty_pam_is_green():
+    assessment = assess({"components": []})
+
+    assert assessment["overall"] == "green"
+    assert assessment["findings"] == []
+
+
+def test_assessment_unknown_component_feature_is_not_invented():
+    assessment = assess(
+        {
+            "components": [
+                {
+                    "id": "unknown",
+                    "kind": "other",
+                    "provider": "aws.other",
+                    "features": ["unknown_feature"],
+                    "usages": [],
+                }
+            ]
+        }
+    )
+
+    assert assessment["findings"] == []
+    assert assessment["overall"] == "green"
+
+
+def test_static_scanner_deduplicates_repeated_usage(tmp_path):
+    app = tmp_path / "ShopLite"
+    app.mkdir()
+    (app / "db.py").write_text(
+        'import boto3\n'
+        'dynamodb = boto3.resource("dynamodb")\n'
+        'def put_order(order_id):\n'
+        '    table = dynamodb.Table("orders")\n'
+        '    table.put_item(Item={"order_id": order_id})\n'
+        '    table.put_item(Item={"order_id": order_id})\n',
+        encoding="utf-8",
+    )
+
+    pam = scan_static(app)
+    orders = next(
+        component for component in pam["components"] if component["id"] == "orders"
+    )
+
+    assert len({usage["operation"] for usage in orders["usages"]}) == 1
+    assert len({(usage["line"], usage["operation"]) for usage in orders["usages"]}) == 2
+
+
+def test_static_scanner_ignores_unrelated_boto3_calls(tmp_path):
+    app = tmp_path / "ShopLite"
+    app.mkdir()
+    (app / "main.py").write_text(
+        'import boto3\n'
+        'sns = boto3.client("sns")\n'
+        'def notify():\n'
+        '    return sns.publish(Message="hello")\n',
+        encoding="utf-8",
+    )
+
+    pam = scan_static(app)
+
+    assert pam["components"] == []

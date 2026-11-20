@@ -62,20 +62,28 @@ def _module_aws_receiver_services(tree: ast.Module) -> dict[str, str]:
             continue
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         call = node.value
-        if not (
+        if (
             isinstance(call, ast.Call)
             and isinstance(call.func, ast.Attribute)
             and isinstance(call.func.value, ast.Name)
             and call.func.value.id == "boto3"
             and call.func.attr in {"client", "resource"}
         ):
-            continue
-        service = _aws_service(call)
-        if service is None:
-            continue
-        for target in targets:
-            if isinstance(target, ast.Name):
-                services[target.id] = service
+            service = _aws_service(call)
+            if service is not None:
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        services[target.id] = service
+        elif (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr in {"Table", "Queue"}
+        ):
+            root = _root_name(call.func.value)
+            if root is not None and root.id in services:
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        services[target.id] = services[root.id]
     return services
 
 

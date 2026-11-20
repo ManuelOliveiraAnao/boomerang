@@ -1,0 +1,41 @@
+{
+  "users": [
+    {
+      "name": "shoplite",
+      "password": "{{ rabbit_password }}",
+      "tags": []
+    }
+  ],
+  "vhosts": [{"name": "shoplite"}],
+  "permissions": [
+    {
+      "user": "shoplite",
+      "vhost": "shoplite",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "exchanges": [
+    {"name": "order-events-dlq", "vhost": "shoplite", "type": "direct", "durable": true}
+  ],
+  "queues": [
+    {
+      "name": "order-events-dlq",
+      "vhost": "shoplite",
+      "durable": true,
+      "arguments": {"x-queue-type": "classic"}
+    },
+    {
+      "name": "order-events",
+      "vhost": "shoplite",
+      "durable": true,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 3,
+        "x-dead-letter-exchange": "order-events-dlq",
+        "x-dead-letter-routing-key": "order-events"
+      }
+    }
+  ]
+}

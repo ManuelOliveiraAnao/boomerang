@@ -54,7 +54,8 @@ def run(run_id: str, *, emit: Emitter | None = None) -> Incident | None:
     """Diagnose the run's self-hosted stack. ``None`` = healthy (an open incident is then marked resolved)."""
     summary, root = _precondition(run_id)
     emit = emit or _emitter(run_id, root)
-    signals = _collect(root / "leaseweb")
+    pam = _read_pam(root)
+    signals = _relevant(_collect(root / "leaseweb"), pam, summary)
     failing = [s for s in signals if not s.ok]
     emit.emit("doctor", f"checked the stack: {len(signals)} signals, {len(failing)} failing", "info",
               signals=len(signals), failing=len(failing))
@@ -64,7 +65,7 @@ def run(run_id: str, *, emit: Emitter | None = None) -> Incident | None:
         emit.emit("doctor", "stack healthy", "success")
         return None
 
-    diagnosis = _diagnose(signals, _read_pam(root), summary)
+    diagnosis = _diagnose(signals, pam, summary, root / "original")
     explanation, raise_severity = explain(diagnosis, emit=emit)
     severity = "down" if raise_severity else diagnosis.severity
     incident = Incident(run_id=run_id, at=time.time(), diagnosis=diagnosis, explanation=explanation,
@@ -78,7 +79,7 @@ def run(run_id: str, *, emit: Emitter | None = None) -> Incident | None:
 
 def fix(run_id: str, action_id: str, target: str, *, by: str, emit: Emitter | None = None) -> Incident:
     """Run one fix the current diagnosis offered, record it in ``doctor.json``, then check the stack again."""
-    _summary, root = _precondition(run_id)
+    summary, root = _precondition(run_id)
     emit = emit or _emitter(run_id, root)
     incident = load(run_id)
     if incident is None:
@@ -107,7 +108,7 @@ def fix(run_id: str, action_id: str, target: str, *, by: str, emit: Emitter | No
     emit.emit("doctor", f"{action.label}: {'done' if ok else 'failed'}{f' · {detail}' if detail else ''}",
               "success" if ok else "error", action=action.id, target=action.target, ok=ok)
 
-    failing = [s for s in _collect(root / "leaseweb") if not s.ok]
+    failing = [s for s in _relevant(_collect(root / "leaseweb"), _read_pam(root), summary) if not s.ok]
     if failing:
         names = ", ".join(sorted({f"{s.service} ({s.source})" for s in failing}))
         emit.emit("doctor", f"still failing after the fix: {names}", "warning", failing=len(failing))
@@ -177,8 +178,13 @@ def _collect(leaseweb_dir: Path) -> list[Signal]:
     return _module("signals").collect(leaseweb_dir)
 
 
-def _diagnose(signals: list[Signal], pam: AppModel, summary: RunSummary) -> Diagnosis:
-    return _module("rules").diagnose(signals, pam, summary.scope)
+def _diagnose(signals: list[Signal], pam: AppModel, summary: RunSummary, app_dir: Path) -> Diagnosis:
+    return _module("rules").diagnose(signals, pam, summary.scope, app_dir=app_dir)
+
+
+def _relevant(signals: list[Signal], pam: AppModel, summary: RunSummary) -> list[Signal]:
+    """Hybrid runs: drop the signals of services that only components staying on AWS would use."""
+    return _module("rules").relevant(signals, pam, summary.scope)
 
 
 def _apply(run_id: str, leaseweb_dir: Path, action: Action, *, by: str, emit: Emitter) -> dict[str, Any]:

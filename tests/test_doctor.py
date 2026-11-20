@@ -68,7 +68,7 @@ class Stack:
         assert leaseweb_dir.name == "leaseweb"
         return self.signals.pop(0) if len(self.signals) > 1 else self.signals[0]
 
-    def diagnose(self, signals, pam, summary) -> Diagnosis:
+    def diagnose(self, signals, pam, summary, app_dir) -> Diagnosis:
         self.diagnosed.append((signals, pam, summary.scope))
         return _diagnosis(self.severity)
 
@@ -298,3 +298,15 @@ def test_incident_json_matches_the_ui_contract():
     data = json.loads(incident.model_dump_json())
     assert set(data["applied"][0]) == {"action", "by", "at", "ok", "detail"}
     assert data["resolved_at"] is None
+
+
+def test_run_with_the_real_rules(run_root, monkeypatch, fake_llm):
+    """Pieces 2 and 3 together: real rules.diagnose / rules.relevant, faked stack and model."""
+    real_diagnose = doctor._diagnose
+    Stack(monkeypatch, [DOWN])
+    monkeypatch.setattr(doctor, "_diagnose", real_diagnose)
+    fake_llm.responses["doctor"] = DoctorExplanation(explanation="Postgres stopped.")
+    incident = doctor.run(RUN)
+    d = incident.diagnosis
+    assert (d.rule, d.component_id, d.severity) == ("db_down", "orders", "down")
+    assert (d.actions[0].id, d.actions[0].target) == ("restart_service", "postgres")

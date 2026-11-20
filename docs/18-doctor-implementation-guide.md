@@ -182,6 +182,23 @@ skip; `move_back` never offered for the last self-hosted component; the order of
 **Done when:** every rule has a test, and `diagnose()` on piece 1's "Postgres stopped" signals returns `db_down`,
 `component_id="orders"`, impact containing "Checkout", and `restart_service postgres` as the first action.
 
+> **Status: done** on branch `doctor-b` (built by C for B). `boomerang/doctor/rules.py`, `tests/test_doctor_rules.py`
+> (18 tests). Differences from the plan above:
+> - `diagnose(signals, pam, scope, *, app_dir=None)`. The orchestrator passes `runs/<id>/original`, and the impact
+>   names the routes that reach the component, read from the entrypoint with `ast`: `orders` gives
+>   "Create order (POST /orders)", "Get order (GET /orders/{order_id})" and
+>   "List customer orders (GET /customers/{customer_id}/orders)". That works for any scanned app, not just ShopLite.
+>   Without `app_dir`, or if the routes can't be read, it says "Everything that uses orders".
+> - `relevant(signals, pam, scope)`: on a hybrid run, drops the signals of a backing service that no self-hosted
+>   component uses. Piece 1 reports such a service as "not created" with a refused port, and without this filter the
+>   Doctor would raise a false incident. The orchestrator filters with it before deciding "healthy".
+> - A `stack_unreachable` rule comes first: piece 1 reports "no Docker" as service `"stack"`, and nothing else can be
+>   judged then.
+> - `config_error` runs **before** `app_crash`: a missing setting is usually why the app crashes on start, and the
+>   error names the setting.
+> - `db_down` still needs the app to be hurt (api logs or health failing). Postgres down with a healthy app → `unknown`.
+> - `reverify`'s target is `"stack"` (piece 1 ignores it).
+
 ---
 
 ## 5. Piece 3 · Contract, AI explanation, CLI: C (Joao)

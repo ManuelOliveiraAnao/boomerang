@@ -11,7 +11,7 @@ import html
 import streamlit as st
 
 from ui.data import Source
-from ui.theme import ACCENT, LIGHT_COLORS, MUTED, empty_state
+from ui.theme import ACCENT, LIGHT_COLORS, MUTED, empty_state, status_icon
 
 KIND = {
     "ai": ("AI rewrite", ACCENT),
@@ -52,9 +52,10 @@ def render(src: Source) -> None:
 
     unchanged = summ.get("tests_unchanged")
     llm = summ.get("llm") or ""
-    tests_txt = ("Original tests unchanged ✓ (hashed before and after)" if unchanged
-                 else "Original tests changed ✗" if unchanged is False else "Test hashes not checked yet")
-    st.caption(f"{tests_txt} · Model: {llm or 'n/a'}")
+    tests_txt = ("Original tests unchanged (hashed before and after)" if unchanged
+                 else "Original tests changed" if unchanged is False else "Test hashes not checked yet")
+    st.markdown(f'<div class="bm-muted" style="display:flex;align-items:center">{status_icon(unchanged, 16)}'
+                f'{tests_txt} · Model: {html.escape(llm or "n/a")}</div>', unsafe_allow_html=True)
 
     choice = st.segmented_control(
         "Show", ["All", "AI", "Checked by code", "Fixes"], default="All", key="code_filter",

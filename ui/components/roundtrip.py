@@ -11,14 +11,14 @@ import pandas as pd
 import streamlit as st
 
 from ui.data import Source
-from ui.theme import AWS_ORANGE, LEASEWEB_RED, LIGHT_COLORS, MUTED, empty_state
+from ui.theme import AWS_ORANGE, LEASEWEB_RED, LIGHT_COLORS, MUTED, check_row, empty_state
 
 
 def _tests(t: dict | None) -> str:
     if not t:
         return "tests not run"
     ok = t["total"] > 0 and t["failed"] == 0 and t["errors"] == 0
-    return f'{"✓" if ok else "✗"} tests {t["passed"]}/{t["total"]}'
+    return f'tests {t["passed"]}/{t["total"]} ' + ("passed" if ok else "· failing")
 
 
 def _counts(move: dict | None, side: str) -> str:
@@ -48,11 +48,14 @@ def _move_table(move: dict) -> None:
         rows.append({
             "Component": c["component_id"], "Kind": c["kind"],
             "Source": c["source_count"], "Target": c["target_count"],
-            "Counts": "✅" if same else "❌",
-            "Checksum": "✅" if chk else "–" if chk is None else "❌",
+            "Counts": "Match" if same else "Mismatch",
+            "Checksum": "Match" if chk else "–" if chk is None else "Mismatch",
             "Notes": "; ".join(c.get("notes", [])),
         })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    green, red = LIGHT_COLORS["green"], LIGHT_COLORS["red"]
+    tone = lambda v: f"color: {green}" if v == "Match" else f"color: {red}" if v == "Mismatch" else ""  # noqa: E731
+    df = pd.DataFrame(rows)
+    st.dataframe(df.style.map(tone, subset=["Counts", "Checksum"]), hide_index=True, width="stretch")
 
 
 def render(src: Source) -> None:
@@ -99,8 +102,7 @@ def render(src: Source) -> None:
     if checks:
         st.markdown("#### Round-trip checks")
         for c in checks:
-            st.markdown(f'{"✅" if c["ok"] else "❌"} **{c["name"]}** '
-                        f'<span class="bm-muted">· {html.escape(c.get("detail", ""))}</span>',
+            st.markdown(check_row(c["ok"], html.escape(c["name"]), f'· {html.escape(c.get("detail", ""))}'),
                         unsafe_allow_html=True)
 
     # ---- what got lost ----

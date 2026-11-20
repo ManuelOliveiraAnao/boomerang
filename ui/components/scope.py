@@ -17,7 +17,7 @@ from ui import runner
 from ui import scope as sc
 from ui.data import Source
 from ui.theme import (ACCENT, AWS_ORANGE, BG, BG_1, BORDER, BORDER_STRONG, FAINT, LIGHT_COLORS, MUTED,
-                      TEXT, TEXT_2)
+                      TEXT, TEXT_2, status_icon)
 
 SH = "#A5A4FF"   # self-hosted lane: Boomerang's accent, so it never reads as a red light
 
@@ -106,7 +106,9 @@ CSS = f"""
   .sc-h .act.over {{ color: {SH}; }}
   .sc-h .act.back {{ color: {AWS_ORANGE}; }}
   .sc-h .c {{ font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.8rem; }}
-  .sc-h .r {{ font-size: 0.76rem; color: {FAINT}; text-align: right; }}
+  .sc-h .r {{ font-size: 0.76rem; color: {FAINT}; text-align: right; display: inline-flex; align-items: center;
+    justify-content: flex-end; }}
+  .sc-h .r .bm-st {{ margin-right: 6px; }}
   .sc-h .r.ok {{ color: {LIGHT_COLORS["green"]}; }}
   .sc-h .r.bad {{ color: {LIGHT_COLORS["red"]}; }}
   .sc-empty {{ color: {FAINT}; font-size: 0.84rem; padding: 14px 2px; border-top: 1px solid {BORDER}; }}
@@ -250,7 +252,7 @@ def _history(src: Source) -> None:
         if s.get("preview"):
             res, cls = "preview · not run", ""
         elif ok is True:
-            res, cls = "verified ✓", "ok"
+            res, cls = "verified", "ok"
         elif ok is False:
             res, cls = "verification failed", "bad"
         else:
@@ -264,7 +266,7 @@ def _history(src: Source) -> None:
         out.append(f'<div class="sc-h"><span class="t">{when}</span>'
                    f'<span class="act {"over" if over else "back"}">{"Move over →" if over else "← Move back"}</span>'
                    f'<span class="c">{comps}{f" <span class=t>{counts}</span>" if counts else ""}</span>'
-                   f'<span class="r {cls}">{res}</span></div>')
+                   f'<span class="r {cls}">{status_icon(None if s.get("preview") else ok, 15)}{res}</span></div>')
     st.markdown('<div class="sc-hist">' + "".join(out) + "</div>", unsafe_allow_html=True)
 
 

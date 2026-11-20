@@ -147,7 +147,7 @@ def render() -> None:
         st.warning("Demo data: this run was assembled from real component outputs plus illustrative "
                    "pipeline results (fixtures/run-demo), not recorded from one pipeline run. "
                    "Pick a run under Recorded run, or switch to Live to start one; a recorded "
-                   "`runs/golden` appears first automatically.", icon="⚠️")
+                   "`runs/golden` appears first automatically.", icon=":material/info:")
     if summ.get("llm") and "cloud" in summ["llm"]:
         st.info(f"This run used the cloud fallback model ({summ['llm']}), not a local model.")
 

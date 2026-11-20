@@ -272,7 +272,8 @@ def plan(source_dir: Path, *, run_id: str | None = None, force: bool = False,
     ctx.save()
     reds = [f for f in assessment.findings if f.light == "red"]
     ctx.emitter.emit("approve", f"plan ready: {report.light_counts(assessment)} · lock-in "
-                     f"{report.score(summary.lock_in_before)} · waiting for approval", "success", step="plan",
+                     # "info", not "success": the approve stage is waiting, not done (the UI shows the level)
+                     f"{report.score(summary.lock_in_before)} · waiting for approval", "info", step="plan",
                      **report.light_numbers(assessment), lock_in_before=summary.lock_in_before)
     for f in reds:
         ctx.emitter.emit("approve", f"will NOT be migrated: {f.component_id} · {f.feature}: {f.what_changes}",

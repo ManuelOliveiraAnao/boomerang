@@ -133,9 +133,13 @@ def render(src: Source) -> None:
     c2.metric(":orange[●] Via adapter", count["amber"])
     c3.metric(":red[●] Needs a human", count["red"])
     summ = src.summary
-    lock = ({"before": summ["lock_in_before"], "after": summ.get("lock_in_after") or 0}
+    lock = ({"before": summ["lock_in_before"], "after": summ.get("lock_in_after")}
             if summ.get("lock_in_before") else src.json("lockin"))
-    if lock and lock.get("before"):
+    if lock and lock.get("before") and lock.get("after") is None:
+        # planned, not migrated yet: there is no "after" score, so nothing is removed yet
+        c4.metric("Lock-in score", f"{lock['before']}", help="Weighted lock-in score before the migration; "
+                  "the after score appears once the run is executed.")
+    elif lock and lock.get("before"):
         removed = round(100 * (1 - lock["after"] / lock["before"]))
         c4.metric("Lock-in removed", f"{removed}%",
                   help=f"Weighted lock-in score {lock['before']} → {lock['after']} "

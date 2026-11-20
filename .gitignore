@@ -2,6 +2,7 @@
 .env
 .env.*
 secrets.env
+laptop.env
 !.env.example
 !**/.env.example
 # Jinja templates are code, not secrets (e.g. generators/templates/.env.example.j2)

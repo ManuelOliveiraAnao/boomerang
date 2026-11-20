@@ -49,6 +49,7 @@ from boomerang import (
     scanner,
     verifier,
 )
+from boomerang import scope as scopes
 from boomerang._stub import NotBuilt
 from boomerang.config import get_settings
 from boomerang.events import Emitter, console_sink, jsonl_sink
@@ -66,6 +67,8 @@ from boomerang.models import (
     LostItem,
     RewriteRecord,
     RunSummary,
+    Scope,
+    ScopeStep,
     Stage,
     TestReport,
     Verification,
@@ -139,6 +142,7 @@ class RunContext:
     summary: RunSummary
     emitter: Emitter
     stage: Stage = "scan"    # current stage, for events emitted by helpers (fixture warnings)
+    scope: list[str] | None = None   # docs/16: components approved to run self-hosted; None = all movable
 
     @property
     def original(self) -> Path: return self.root / "original"
@@ -266,7 +270,7 @@ def plan(source_dir: Path, *, run_id: str | None = None, force: bool = False,
         atomic_write_text(root / "assessment.json", assessment.model_dump_json(indent=2))
         summary.assessment = assessment
     with _stage(ctx, "assess", "lock-in before"):
-        summary.lock_in_before = _call(ctx, "lock-in before", lockin.score, pam, default=None)
+        summary.lock_in_before = _call(ctx, "lock-in before", lockin.score, pam, [], default=None)
 
     summary.status = "awaiting_approval"
     ctx.save()
@@ -281,15 +285,28 @@ def plan(source_dir: Path, *, run_id: str | None = None, force: bool = False,
     return ctx
 
 
-def approve(run_id: str, *, approved_by: str = "cli", emit_extra: UISink | None = None) -> Approval:
-    """Record who approved and the sha256 of the plan they saw (`approval.json`)."""
+def approve(run_id: str, *, approved_by: str = "cli", scope: list[str] | None = None,
+            emit_extra: UISink | None = None) -> Approval:
+    """Record who approved, the sha256 of the plan they saw and the scope they chose (`approval.json`).
+
+    ``scope`` (partial migration, docs/16): component ids to run self-hosted; the other movable components
+    stay on AWS. ``None`` = every movable component (the full migration).
+    """
     ctx = _load(run_id, emit_extra)
     if ctx.summary.status == "running":
         raise PipelineError(f"run {run_id} is running; approve it after it stops")
-    approval = Approval(approved_by=approved_by, ts=time.time(), plan_sha256=plan_sha256(ctx.root))
+    pam = _read_pam(ctx)
+    selected = _check_scope(pam, scope)
+    approval = Approval(approved_by=approved_by, ts=time.time(), plan_sha256=plan_sha256(ctx.root), scope=selected)
     atomic_write_text(ctx.root / "approval.json", approval.model_dump_json(indent=2))
-    ctx.emitter.emit("approve", f"plan approved by {approved_by} · sha256 {approval.plan_sha256[:12]}", "success",
-                     step="approve", approved_by=approved_by, plan_sha256=approval.plan_sha256)
+    ctx.summary.scope = Scope(selfhosted=selected) if selected is not None else None
+    ctx.save()
+    ctx.emitter.emit("approve", f"plan approved by {approved_by} · sha256 {approval.plan_sha256[:12]} · "
+                     f"{_scope_text(pam, selected)}", "success", step="approve", approved_by=approved_by,
+                     plan_sha256=approval.plan_sha256, scope=selected)
+    hybrid = scopes.hybrid_finding(pam, selected)
+    if hybrid is not None:
+        ctx.emitter.emit("approve", f"🔴 hybrid: {hybrid.what_changes}", "warning", step="approve")
     return approval
 
 
@@ -301,6 +318,8 @@ def execute(run_id: str, *, emit_extra: UISink | None = None) -> RunSummary:
         raise PipelineError(f"{ctx.original} is missing: plan the run again")
     pam = AppModel.model_validate_json((ctx.root / "pam.json").read_text(encoding="utf-8"))
     approved = Assessment.model_validate_json((ctx.root / "assessment.json").read_text(encoding="utf-8"))
+    ctx.scope = approval.scope
+    ctx.summary.scope = Scope(selfhosted=approval.scope) if approval.scope is not None else None
 
     ctx.summary.status = "running"
     ctx.summary.finished_at = None
@@ -313,25 +332,7 @@ def execute(run_id: str, *, emit_extra: UISink | None = None) -> RunSummary:
             _reset_previous(ctx, approved)
         with _stage(ctx, "verify", "baseline"):
             _baseline_step(ctx, pam)
-        with _stage(ctx, "generate", "prepare"):
-            _prepare(ctx)
-        with _stage(ctx, "delock", "delock"):
-            ctx.summary.rewrites = delock.delock_detailed(ctx.app, pam, approved, ctx.emitter, ctx.diffs,
-                                                          out_dir=ctx.root)
-            final = ctx.root / "assessment.final.json"
-            if final.is_file():
-                ctx.summary.assessment = Assessment.model_validate_json(final.read_text(encoding="utf-8"))
-            ctx.save()
-        with _stage(ctx, "generate", "generate"):
-            _generate(ctx, pam)
-        with _stage(ctx, "assess", "lock-in after"):
-            _lock_in_after(ctx)
-        with _stage(ctx, "verify", "verify"):
-            _verify_loop(ctx, pam)
-        with _stage(ctx, "verify", "test integrity"):
-            _test_integrity(ctx)
-        with _stage(ctx, "data", "data"):
-            _data_step(ctx, pam)
+        _migrate_tail(ctx, pam, approved)
         with _stage(ctx, "report", "report"):
             _finish(ctx)
             report.write(ctx)
@@ -340,6 +341,42 @@ def execute(run_id: str, *, emit_extra: UISink | None = None) -> RunSummary:
         _try_report(ctx)
         raise
     return ctx.summary
+
+
+def _migrate_tail(ctx: RunContext, pam: AppModel, approved: Assessment) -> None:
+    """Everything after the baseline, for ``ctx.scope``: shared by execute() and the scope steps."""
+    with _stage(ctx, "generate", "prepare"):
+        _prepare(ctx)
+    with _stage(ctx, "delock", "delock"):
+        ctx.summary.rewrites = delock.delock_detailed(ctx.app, pam, approved, ctx.emitter, ctx.diffs,
+                                                      out_dir=ctx.root, scope=ctx.scope)
+        final = ctx.root / "assessment.final.json"
+        if final.is_file():
+            ctx.summary.assessment = Assessment.model_validate_json(final.read_text(encoding="utf-8"))
+        _add_hybrid_finding(ctx, pam)
+        ctx.save()
+    with _stage(ctx, "generate", "generate"):
+        _generate(ctx, pam)
+    with _stage(ctx, "assess", "lock-in after"):
+        _lock_in_after(ctx)
+    with _stage(ctx, "verify", "verify"):
+        _verify_loop(ctx, pam)
+    with _stage(ctx, "verify", "test integrity"):
+        _test_integrity(ctx)
+    with _stage(ctx, "data", "data"):
+        _data_step(ctx, pam)
+
+
+def move_over(run_id: str, components: list[str], *, by: str = "cli",
+              emit_extra: UISink | None = None) -> RunSummary:
+    """docs/16: run more components self-hosted (a scope step after a passed migration)."""
+    return _change_scope(run_id, components, "move_over", by, emit_extra)
+
+
+def move_back(run_id: str, components: list[str], *, by: str = "cli",
+              emit_extra: UISink | None = None) -> RunSummary:
+    """docs/16: put components back on AWS, keep the rest self-hosted (a scope step)."""
+    return _change_scope(run_id, components, "move_back", by, emit_extra)
 
 
 def migrate(source_dir: Path, *, yes: bool = False, run_id: str | None = None, force: bool = False,
@@ -362,10 +399,13 @@ def roundtrip(run_id: str, *, emit_extra: UISink | None = None) -> RunSummary:
     before, has_api = _roundtrip_preconditions(ctx)
 
     s = ctx.summary
+    ctx.scope = s.scope.selfhosted if s.scope is not None else None
+    hybrid = scopes.is_hybrid(pam, ctx.scope)
     s.roundtrip, s.roundtrip_checks, s.roundtrip_tests, s.lost = "error", [], None, []
     s.data_moves = [before]                      # data/aws-to-leaseweb.json is the source of truth
     ctx.save()
-    ctx.emit(f"round trip {run_id}: AWS → Leaseweb → fresh AWS", step="round trip", api=has_api)
+    ctx.emit(f"round trip {run_id}: AWS → Leaseweb → {'AWS (hybrid: kept components never left)' if hybrid else 'fresh AWS'}",
+             step="round trip", api=has_api, scope=ctx.scope)
     try:
         with _stage(ctx, "rollback", "freeze worker", field="roundtrip"):
             _call(ctx, "stop worker", verifier.stop_service, ctx.leaseweb, "worker", default=None)
@@ -373,9 +413,15 @@ def roundtrip(run_id: str, *, emit_extra: UISink | None = None) -> RunSummary:
             with _stage(ctx, "rollback", "write on Leaseweb", field="roundtrip"):
                 order = _write_order(ctx, pam, has_api)
             with _stage(ctx, "rollback", "fresh AWS", field="roundtrip"):
-                lab.reset()
-                provisioner_aws.provision(pam, ctx.emitter)
-                ctx.emit("fresh (emulated) AWS: resources provisioned, no data", step="fresh AWS")
+                if hybrid:                       # the kept components live on AWS: never wipe them
+                    provisioner_aws.provision(pam, ctx.emitter)
+                    kept = ", ".join(c.id for c in scopes.kept(pam, ctx.scope))
+                    ctx.emit(f"AWS kept as is ({kept} never left); only the self-hosted components come back",
+                             step="fresh AWS")
+                else:
+                    lab.reset()
+                    provisioner_aws.provision(pam, ctx.emitter)
+                    ctx.emit("fresh (emulated) AWS: resources provisioned, no data", step="fresh AWS")
             with _stage(ctx, "data", "copy back", field="roundtrip"):
                 back = _copy_back(ctx, pam)
             with _stage(ctx, "rollback", "checks", field="roundtrip"):
@@ -530,7 +576,7 @@ def _prepare(ctx: RunContext) -> None:
 
 def _generate(ctx: RunContext, pam: AppModel) -> None:
     """Leaseweb files from B's generator (LF, contained in leaseweb/), then sovereign_sdk/ into app/ (L7)."""
-    files = _call(ctx, "generate", _render, pam, default=None)
+    files = _call(ctx, "generate", _render, pam, ctx.scope, default=None)
     if files is None:
         ctx.emit("no Leaseweb files generated (generator not built)", "warning", step="generate")
     else:
@@ -544,8 +590,9 @@ def _generate(ctx: RunContext, pam: AppModel) -> None:
     redact.secret_values.cache_clear()           # the new passwords are redacted from every prompt from now on
 
 
-def _render(pam: AppModel) -> list[GeneratedFile]:
-    return leaseweb_gen.render(pam, leaseweb_gen.make_secrets(pam))
+def _render(pam: AppModel, scope: list[str] | None = None) -> list[GeneratedFile]:
+    secrets = leaseweb_gen.make_secrets(pam)
+    return leaseweb_gen.render(pam, secrets) if scope is None else leaseweb_gen.render(pam, secrets, scope)
 
 
 def _write_generated(ctx: RunContext, f: GeneratedFile) -> None:
@@ -581,7 +628,7 @@ def _lock_in_after(ctx: RunContext) -> None:
     """L16: static scan of the migrated app (no AI; tests/ and sovereign_sdk/ excluded)."""
     residual = _call(ctx, "lock-in after", scanner_static.scan_static, ctx.app, default=None)
     if residual is not None:
-        ctx.summary.lock_in_after = _call(ctx, "lock-in after", lockin.score, residual, default=None)
+        ctx.summary.lock_in_after = _call(ctx, "lock-in after", lockin.score, residual, [], default=None)
     reds = sum(f.light == "red" for f in (ctx.summary.assessment.findings if ctx.summary.assessment else []))
     note = f"; {reds} 🔴 item(s) leave the score because they were not migrated, not because they were solved" \
         if reds else ""
@@ -673,8 +720,8 @@ def _move_data(ctx: RunContext, pam: AppModel) -> DataMove:
     verifier.reset_data(ctx.leaseweb)            # the verify tests wrote orders: start from empty tables
     verifier.stop_service(ctx.leaseweb, "worker")
     try:
-        move = datamover.move(pam, "aws->leaseweb", verifier.aws_env(), verifier.leaseweb_env(ctx.leaseweb),
-                              ctx.emitter)
+        move = _scoped_move(pam, "aws->leaseweb", verifier.aws_env(), verifier.leaseweb_env(ctx.leaseweb),
+                            ctx.emitter, ctx.scope)
     except BaseException:
         with suppress(Exception):
             verifier.start_service(ctx.leaseweb, "worker")
@@ -702,6 +749,136 @@ def _finish(ctx: RunContext) -> None:
         ctx.emit(f"run failed: {'; '.join(reasons)}", "error", step="report", reasons=reasons)
     else:
         ctx.emit("run passed: verified, original tests unchanged, data counts match", "success", step="report")
+
+
+# ---------- partial migration (docs/16) ----------
+
+def _read_pam(ctx: RunContext) -> AppModel:
+    return AppModel.model_validate_json((ctx.root / "pam.json").read_text(encoding="utf-8"))
+
+
+def _check_scope(pam: AppModel, scope: list[str] | None) -> list[str] | None:
+    """Validated scope in PAM order; ``None`` when it is every movable component (the full migration)."""
+    if scope is None:
+        return None
+    try:
+        chosen = set(scopes.normalize_scope(pam, scope).selfhosted)
+    except ValueError as e:
+        raise PipelineError(f"{e}; movable components: {', '.join(c.id for c in scopes.movable(pam))}") from e
+    if not chosen:
+        raise PipelineError("an empty scope moves nothing: choose at least one component")
+    ordered = [c.id for c in scopes.movable(pam) if c.id in chosen]
+    return None if len(ordered) == len(scopes.movable(pam)) else ordered
+
+
+def _scope_text(pam: AppModel, scope: list[str] | None) -> str:
+    if scope is None:
+        return "scope: every movable component"
+    kept = [c.id for c in scopes.kept(pam, scope)]
+    return f"scope: {', '.join(scope)} self-hosted" + (f"; {', '.join(kept)} stay on AWS" if kept else "")
+
+
+def _scoped_move(pam: AppModel, direction: str, src: dict[str, str], dst: dict[str, str], emit: Emitter,
+                 scope: list[str] | None) -> DataMove:
+    if scope is None:                            # the full migration: A's mover as it always was called
+        return datamover.move(pam, direction, src, dst, emit)  # type: ignore[arg-type]
+    return datamover.move(pam, direction, src, dst, emit, components=scope)  # type: ignore[arg-type]
+
+
+def _add_hybrid_finding(ctx: RunContext, pam: AppModel) -> None:
+    """A hybrid scope needs scoped AWS credentials on the self-hosted side: a 🔴 in the final assessment."""
+    finding = scopes.hybrid_finding(pam, ctx.scope)
+    a = ctx.summary.assessment
+    if finding is None or a is None or any(f.component_id == "hybrid" for f in a.findings):
+        return
+    a.findings.append(finding)
+    atomic_write_text(ctx.root / "assessment.final.json", a.model_dump_json(indent=2) + "\n")
+    ctx.emit(f"🔴 hybrid: {finding.what_changes}", "warning", step="delock")
+
+
+STEP_FILES = ("delock.json", "assessment.final.json", "lost.json", "report.md", "data/roundtrip-writes.json")
+
+
+def _change_scope(run_id: str, components: list[str], action: str, by: str,
+                  emit_extra: UISink | None) -> RunSummary:
+    """One scope step (docs/16 §3.1). AWS is the system of record between steps: the current self-hosted data
+    goes back to AWS, the app is rebuilt for the new scope (de-lock, files, verify), then the new scope's data
+    moves over. The original AWS code in original/ is never touched."""
+    ctx = _load(run_id, emit_extra)
+    ctx.stage = "approve"
+    s = ctx.summary
+    pam = _read_pam(ctx)
+    again = f"re-run `boomerang execute {run_id}`"
+    if s.status != "passed":
+        raise PipelineError(f"run {run_id} is {s.status}: move components after a passed migration; {again}")
+    if active_stack() != run_id:
+        raise PipelineError(f"the self-hosted stack that is up belongs to {active_stack() or 'no run'}; {again}")
+    movable_ids = [c.id for c in scopes.movable(pam)]
+    current = s.scope.selfhosted if s.scope is not None else movable_ids
+    asked = set(_check_scope(pam, components) or movable_ids)
+    if action == "move_over":
+        if asked <= set(current):
+            raise PipelineError(f"already self-hosted: {', '.join(sorted(asked))}")
+        new = [c for c in movable_ids if c in set(current) | asked]
+    else:
+        if not asked & set(current):
+            raise PipelineError(f"not self-hosted, nothing to move back: {', '.join(sorted(asked))}")
+        new = [c for c in movable_ids if c in set(current) - asked]
+        if not new:
+            raise PipelineError(f"that moves everything back: use `boomerang roundtrip {run_id}`")
+    new_scope = None if len(new) == len(movable_ids) else new
+    approved = Assessment.model_validate_json((ctx.root / "assessment.json").read_text(encoding="utf-8"))
+    approval = _check_gate(ctx).model_copy(update={"scope": new_scope, "approved_by": by, "ts": time.time()})
+    atomic_write_text(ctx.root / "approval.json", approval.model_dump_json(indent=2))
+    moved = sorted(asked & set(current)) if action == "move_back" else sorted(asked - set(current))
+    ctx.emit(f"{action}: {', '.join(moved)} · approved by {by} · {_scope_text(pam, new_scope)}", "success",
+             step=action, components=moved, scope=new_scope)
+
+    s.status, s.finished_at = "running", None
+    s.llm = get_settings().llm_badge
+    ctx.save()
+    try:
+        with _stage(ctx, "data", f"{action}: self-hosted data to AWS"):
+            _call(ctx, "stop worker", verifier.stop_service, ctx.leaseweb, "worker", default=None)
+            back = _scoped_move(pam, "leaseweb->aws", verifier.leaseweb_env(ctx.leaseweb), verifier.aws_env(),
+                                ctx.emitter, current)
+            atomic_write_text(ctx.data / f"step-{len(s.steps) + 1}-leaseweb-to-aws.json", back.model_dump_json(indent=2))
+            if not back.ok:
+                raise PipelineError(f"copying the self-hosted data back to AWS failed: {back.model_dump_json()[:300]}")
+        with _stage(ctx, "approve", f"{action}: rebuild for the new scope"):
+            _reset_for_step(ctx, approved)
+            ctx.scope = new_scope
+            s.scope = Scope(selfhosted=new_scope) if new_scope is not None else None
+            ctx.save()
+        _migrate_tail(ctx, pam, approved)
+        with _stage(ctx, "report", "report"):
+            last = s.verifications[-1] if s.verifications else None
+            s.steps.append(ScopeStep(at=time.time(), action=action, components=moved,  # type: ignore[arg-type]
+                                     verification_ok=bool(last and last.ok), data_moves=[back, *s.data_moves]))
+            _finish(ctx)
+            report.write(ctx)
+            ctx.save()
+    except BaseException:
+        _try_report(ctx)
+        raise
+    return s
+
+
+def _reset_for_step(ctx: RunContext, approved: Assessment) -> None:
+    """Like _reset_previous, but the baseline, the step history and the AWS data stay."""
+    if active_stack() == ctx.run_id:
+        try:
+            cleanup(ctx.run_id)
+        except PipelineError as e:
+            ctx.emit(f"{e}; the next verify replaces the stack anyway", "warning")
+    for name in ("leaseweb", "diffs", "verify"):
+        _rmtree(ctx.root / name)
+    for name in STEP_FILES:
+        (ctx.root / name).unlink(missing_ok=True)
+    s = ctx.summary
+    s.assessment, s.rewrites, s.verifications, s.data_moves, s.lost = approved, [], [], [], []
+    s.tests_unchanged, s.lock_in_after = None, None
+    s.roundtrip, s.roundtrip_checks, s.roundtrip_tests = "not_run", [], None
 
 
 # ---------- roundtrip() steps (docs/15 §7) ----------
@@ -843,8 +1020,8 @@ def subprocess_env(extra: dict[str, str]) -> dict[str, str]:
 
 
 def _copy_back(ctx: RunContext, pam: AppModel) -> DataMove:
-    back: DataMove = _call(ctx, "copy back", datamover.move, pam, "leaseweb->aws",
-                           verifier.leaseweb_env(ctx.leaseweb), verifier.aws_env(), ctx.emitter,
+    back: DataMove = _call(ctx, "copy back", _scoped_move, pam, "leaseweb->aws",
+                           verifier.leaseweb_env(ctx.leaseweb), verifier.aws_env(), ctx.emitter, ctx.scope,
                            fixture="data_back", model=DataMove)
     atomic_write_text(ctx.data / "leaseweb-to-aws.json", back.model_dump_json(indent=2))
     ctx.summary.data_moves = [*ctx.summary.data_moves[:1], back]
@@ -948,7 +1125,8 @@ def _what_got_lost(ctx: RunContext, pam: AppModel) -> None:
                   else ctx.summary.assessment)
     if assessment is None:
         assessment = Assessment.model_validate_json((ctx.root / "assessment.json").read_text(encoding="utf-8"))
-    items: list[LostItem] = _call(ctx, "what got lost", lost.build, pam, assessment, ctx.summary.data_moves,
+    args = (pam, assessment, ctx.summary.data_moves) + ((ctx.scope,) if ctx.scope is not None else ())
+    items: list[LostItem] = _call(ctx, "what got lost", lost.build, *args,
                                   fixture="lost", model=list[LostItem], default=[])
     ctx.summary.lost = items
     atomic_write_text(ctx.root / "lost.json",

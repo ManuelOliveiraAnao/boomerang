@@ -342,7 +342,7 @@ def test_hybrid_scope_adds_aws_laptop_environment():
     laptop = next(generated.content for generated in files if generated.path == "laptop.env")
     compose = next(generated.content for generated in files if generated.path == "docker-compose.yml")
     assert "AWS_ENDPOINT_URL=http://127.0.0.1:4566" in laptop
-    assert "ORDER_EVENTS_QUEUE=<aws-name>" in laptop
+    assert "ORDER_EVENTS_QUEUE=order-events" in laptop          # the real name: the tests use it against moto
     assert "host.docker.internal:host-gateway" in compose
     assert "AWS_ENDPOINT_URL: http://host.docker.internal:4566" in compose
 

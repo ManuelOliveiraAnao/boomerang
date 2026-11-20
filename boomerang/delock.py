@@ -84,11 +84,13 @@ def delock(app_dir: Path, pam: AppModel, assessment: Assessment, emit: Emitter) 
 
 
 def delock_detailed(app_dir: Path, pam: AppModel, assessment: Assessment, emit: Emitter,
-                    diffs_dir: Path, *, out_dir: Path | None = None) -> list[RewriteRecord]:
+                    diffs_dir: Path, *, out_dir: Path | None = None,
+                    scope: list[str] | None = None) -> list[RewriteRecord]:
     """What the pipeline calls; ``delock()`` wraps it. ``delock.json`` and ``assessment.final.json`` are
     written to ``out_dir`` (default: the parent of ``diffs_dir``, i.e. ``runs/<id>/``)."""
     diffs_dir = Path(diffs_dir)
-    return _run(Path(app_dir), pam, assessment, emit, diffs_dir, Path(out_dir) if out_dir else diffs_dir.parent).records
+    return _run(Path(app_dir), pam, assessment, emit, diffs_dir, Path(out_dir) if out_dir else diffs_dir.parent,
+                scope).records
 
 
 def final_assessment(assessment: Assessment, extra: list[Finding]) -> Assessment:
@@ -128,6 +130,7 @@ class _Job:
     slice: FunctionSlice
     comps: list[Component]
     usage_lines: list[int]
+    kept: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -142,9 +145,12 @@ class _Outcome:
 # ---------- the run ----------
 
 def _run(app_dir: Path, pam: AppModel, assessment: Assessment, emit: Emitter | None,
-         diffs_dir: Path, out_dir: Path) -> _Result:
+         diffs_dir: Path, out_dir: Path, scope: list[str] | None = None) -> _Result:
     app_dir = app_dir.resolve()
-    migrated, in_play = _decide(pam, assessment, emit)
+    migrated, in_play = _decide(pam, assessment, emit, scope)
+    # partial migration (docs/16): components that stay on AWS keep their boto3 calls; the prompt says so
+    kept = [f"{c.id} ({c.provider})" for c in pam.components
+            if scope is not None and c.kind in ADAPTER_OF_KIND and c.provider.startswith("aws.") and c.id not in scope]
 
     # 2. slice: functions that use a migrated kv/queue component
     sliced = slicer.functions_with_usages(app_dir, pam, emit)
@@ -166,7 +172,7 @@ def _run(app_dir: Path, pam: AppModel, assessment: Assessment, emit: Emitter | N
             node = next(n for n, q in ctx.info.functions if n.lineno == sl.start and q == sl.qualname)
             lines = [u.line for c in comps for u in c.usages
                      if slicer.normalize_path(u.file, app_dir) == rel and sl.start <= u.line <= sl.end]
-            jobs.append(_Job(ctx, node, sl, comps, lines))
+            jobs.append(_Job(ctx, node, sl, comps, lines, kept))
 
     # 3. per function: code first (L14), then the AI
     settings = get_settings()
@@ -201,11 +207,20 @@ def _run(app_dir: Path, pam: AppModel, assessment: Assessment, emit: Emitter | N
     return _Result(records, rewrites, findings)
 
 
-def _decide(pam: AppModel, assessment: Assessment, emit: Emitter | None) -> tuple[set[str], dict[str, str]]:
-    """Component ids to migrate, and the adapter modules in play (``{"kv": "kv", …}``)."""
+def _decide(pam: AppModel, assessment: Assessment, emit: Emitter | None,
+            scope: list[str] | None = None) -> tuple[set[str], dict[str, str]]:
+    """Component ids to migrate, and the adapter modules in play (``{"kv": "kv", …}``).
+
+    ``scope`` (partial migration, docs/16): only these components move; the others keep boto3 and their
+    module-level clients stay unswapped. ``None`` = every movable component (the full migration).
+    """
     migrated: set[str] = set()
     modules: set[str] = set()
     for comp in pam.components:
+        if scope is not None and comp.id not in scope and comp.kind in ADAPTER_OF_KIND:
+            _emit(emit, f"{comp.id} ({comp.kind}): stays on AWS (not in the approved scope); boto3 calls kept",
+                  "info", component_id=comp.id, decision="kept_on_aws")
+            continue
         lights = [f.light for f in assessment.findings if f.component_id == comp.id]
         adapter = ADAPTER_OF_KIND.get(comp.kind)
         if adapter is None or not comp.provider.startswith("aws."):
@@ -312,7 +327,7 @@ def _process(job: _Job, emit: Emitter | None) -> _Outcome:
     components = _components_json(job)
     context = _context_after_swap(job)
     user = str(tmpl.module.user(file=sl.file, qualname=sl.qualname, components=components, context=context,
-                                source=_data(sl.source), previous=None))
+                                source=_data(sl.source), previous=None, kept=job.kept))
 
     try:
         answer = llm.structured(system=system, user=user, schema=FunctionRewrite,
@@ -323,7 +338,8 @@ def _process(job: _Job, emit: Emitter | None) -> _Outcome:
                   violations=violations)
             retry_user = str(tmpl.module.user(
                 file=sl.file, qualname=sl.qualname, components=components, context=context,
-                source=_data(sl.source), previous={"violations": violations, "source": _data(candidate)}))
+                source=_data(sl.source), previous={"violations": violations, "source": _data(candidate)},
+                kept=job.kept))
             answer = llm.structured(system=system, user=retry_user, schema=FunctionRewrite,
                                     label=f"delock-retry:{sl.file}:{sl.qualname}", emit=emit, stage="delock")
             candidate, violations = _judge(job, answer.new_source, emit)

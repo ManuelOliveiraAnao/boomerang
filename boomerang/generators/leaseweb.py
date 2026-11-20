@@ -76,7 +76,7 @@ def render(pam: AppModel, secrets: dict[str, str], scope: Scope | Iterable[str] 
         ]
         for component in kept_movable:
             if component.name_env_var:
-                aws_variables.append(f"{component.name_env_var}=<aws-name>")
+                aws_variables.append(f"{component.name_env_var}={component.resource_name}")
     aws_environment = {}
     if kept_movable:
         aws_environment = {
@@ -87,7 +87,7 @@ def render(pam: AppModel, secrets: dict[str, str], scope: Scope | Iterable[str] 
         }
         for component in kept_movable:
             if component.name_env_var:
-                aws_environment[component.name_env_var] = "<aws-name>"
+                aws_environment[component.name_env_var] = component.resource_name
     context = {
         "database_password": secrets["POSTGRES_PASSWORD"],
         "rabbit_password": secrets["RABBITMQ_PASSWORD"],
@@ -123,7 +123,7 @@ def render(pam: AppModel, secrets: dict[str, str], scope: Scope | Iterable[str] 
                 "AWS_ACCESS_KEY_ID=CHANGE_ME",
                 "AWS_SECRET_ACCESS_KEY=CHANGE_ME",
                 *[
-                    f"{component.name_env_var}=<aws-name>"
+                    f"{component.name_env_var}={component.resource_name}"
                     for component in kept_movable
                     if component.name_env_var
                 ],

@@ -147,7 +147,7 @@ def world(monkeypatch: pytest.MonkeyPatch, llm) -> World:
         "boomerang.scanner.scan": scan,
         "boomerang.scanner.static.scan_static": lambda app_dir, exclude=("tests", "sovereign_sdk"): RESIDUAL,
         "boomerang.assess.assess": lambda pam, emit: mini_assessment(),
-        "boomerang.lockin.score": lambda pam: 80 if pam.components else 12,
+        "boomerang.lockin.score": lambda pam, scope=None: (80 if pam.components else 12) if scope == [] else 999,
         "boomerang.lab.status": lambda: w.lab_up,
         "boomerang.lab.reset": record("lab.reset"),
         "boomerang.provisioner_aws.provision": record("provision"),

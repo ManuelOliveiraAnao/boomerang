@@ -32,7 +32,7 @@ Answer:
 {"analysis": "Reads one user. get_item maps 1:1, but ConsistentRead is not an adapter argument; Postgres reads are always consistent, so it is dropped.", "new_source": "def get_user(user_id):\n    resp = table.get_item(Key={\"user_id\": user_id})\n    return resp.get(\"Item\")", "unsupported": []}
 {%- endmacro %}
 
-{%- macro user(file, qualname, components, context, source, previous) -%}
+{%- macro user(file, qualname, components, context, source, previous, kept=none) -%}
 Migrate the function `{{ qualname }}` from `{{ file }}`.
 
 AWS resources it uses (from the scan):
@@ -49,6 +49,10 @@ Function:
 <<<FUNCTION_SOURCE
 {{ source }}
 FUNCTION_SOURCE>>>
+{%- if kept %}
+
+These AWS resources stay on AWS (partial migration): {{ kept | join(", ") }}. Calls to them must stay exactly as they are (boto3).
+{%- endif %}
 {%- if previous %}
 
 Your previous answer was rejected by the rules check:

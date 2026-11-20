@@ -188,8 +188,12 @@ MOVERS = {"kv_table": move_table, "object_store": move_objects, "queue": move_qu
 
 
 def move(pam: AppModel, direction: Direction, src_env: dict[str, str], dst_env: dict[str, str],
-         emit: Emitter | None = None, sides: tuple[Side, Side] | None = None) -> DataMove:
-    """Copy every data component from src to dst. `sides` overrides the (src, dst) handles for tests."""
+         emit: Emitter | None = None, sides: tuple[Side, Side] | None = None, *,
+         components: list[str] | None = None) -> DataMove:
+    """Copy every data component from src to dst. `sides` overrides the (src, dst) handles for tests.
+
+    `components` (partial migration, docs/16 §3.3): copy only these component ids; None = all movable.
+    """
     def say(message: str, level: str = "info", **data) -> None:
         if emit is not None:
             emit.emit("data", message, level, direction=direction, **data)
@@ -205,7 +209,7 @@ def move(pam: AppModel, direction: Direction, src_env: dict[str, str], dst_env: 
     counts: list[DataCount] = []
     for c in pam.components:
         mover = MOVERS.get(c.kind)
-        if mover is None:
+        if mover is None or (components is not None and c.id not in components):
             continue
         say(f"copying {c.id} ({c.kind})")
         try:

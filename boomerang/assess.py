@@ -9,7 +9,7 @@ import boomerang.llm as llm
 from boomerang.config import get_settings
 from boomerang.events import Emitter
 from boomerang.models import AppModel, Assessment, Finding, Scope
-from boomerang.scope import movable, normalize_scope
+from boomerang.scope import hybrid_finding
 from collections.abc import Iterable
 
 
@@ -84,25 +84,9 @@ def assess(
         summary=f"{len(findings)} migration findings",
     )
 
-    normalized = normalize_scope(pam, scope)
-    movable_components = movable(pam)
-    selfhosted = set(normalized.selfhosted)
-    kept = [component for component in movable_components if component.id not in selfhosted]
-    all_ids = {component.id for component in movable_components}
-    if kept and selfhosted and selfhosted != all_ids:
-        finding = Finding(
-            analysis="Hybrid scope keeps AWS components while other components run self-hosted.",
-            component_id="hybrid",
-            feature="aws_credentials",
-            light="red",
-            what_changes=(
-                "Create scoped AWS credentials for kept components: "
-                + ", ".join(sorted(component.id for component in kept))
-                + "."
-            ),
-            evidence=[],
-        )
-        findings.append(finding)
+    hybrid = hybrid_finding(pam, scope)              # same text as the pipeline's (scope.py)
+    if hybrid is not None:
+        findings.append(hybrid)
 
     if get_settings().allow_fixtures:
         ai_assessment = None

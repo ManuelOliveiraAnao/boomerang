@@ -131,6 +131,15 @@ def _run_root(run_id: str) -> Path:
 
 
 AppDir = Annotated[Path, typer.Argument(exists=True, file_okay=False, help="Folder of the AWS app to scan.")]
+Only = Annotated[str | None, typer.Option(
+    "--only", help="Partial migration: comma-separated component ids to run self-hosted (default: all movable).")]
+Components = Annotated[str, typer.Argument(help="Comma-separated component ids, e.g. orders,receipts.")]
+
+
+def _ids(text: str | None) -> list[str] | None:
+    """``"orders, receipts"`` → ``["orders", "receipts"]``; None/empty → None (every movable component)."""
+    ids = [part.strip() for part in (text or "").split(",") if part.strip()]
+    return ids or None
 RunId = Annotated[str, typer.Argument(help="Run id (folder name under runs/).")]
 
 
@@ -185,6 +194,7 @@ def migrate(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Approve the plan without asking.")] = False,
     run_id: Annotated[str | None, typer.Option(help="Run id (default: timestamp).")] = None,
     force: Annotated[bool, typer.Option(help="Replace an existing run with this id.")] = False,
+    only: Only = None,
 ) -> None:
     """Scan → lights → approve → de-lock → Leaseweb files → verify → data."""
     with _handled():
@@ -204,7 +214,7 @@ def migrate(
             if not ok:
                 console.print(f"⏸️ run {ctx.run_id} is waiting for approval: boomerang approve {ctx.run_id}")
                 raise typer.Exit(EXIT_AWAITING)
-        pipeline.approve(ctx.run_id, approved_by="auto" if yes else "cli")
+        pipeline.approve(ctx.run_id, approved_by="auto" if yes else "cli", scope=_ids(only))
         summary = pipeline.execute(ctx.run_id)
     _print_summary(summary)
     raise typer.Exit(_status_exit(summary.status))
@@ -229,12 +239,14 @@ def plan(
 def approve(
     run_id: RunId,
     by: Annotated[str, typer.Option(help="Who approved: cli, ui or auto.")] = "cli",
+    only: Only = None,
 ) -> None:
-    """Approve a planned run (records the hash of what was approved)."""
+    """Approve a planned run (records the hash of what was approved, and the scope)."""
     with _handled():
         from boomerang import pipeline
-        approval = pipeline.approve(run_id, approved_by=by)
-    console.print(f"✅ approved by {approval.approved_by} · plan {approval.plan_sha256[:12]}")
+        approval = pipeline.approve(run_id, approved_by=by, scope=_ids(only))
+    scope = ", ".join(approval.scope) if approval.scope else "every movable component"
+    console.print(f"✅ approved by {approval.approved_by} · plan {approval.plan_sha256[:12]} · self-hosted: {scope}")
 
 
 @app.command()
@@ -256,6 +268,40 @@ def roundtrip(run_id: RunId) -> None:
     icon = {"passed": "✅", "failed": "❌"}.get(summary.roundtrip, "❌")
     console.print(f"{icon} round trip {run_id}: {summary.roundtrip}")
     raise typer.Exit({"passed": EXIT_PASSED, "failed": EXIT_FAILED}.get(summary.roundtrip, EXIT_ERROR))
+
+
+@app.command("move-over")
+def move_over(
+    run_id: RunId,
+    components: Components,
+    by: Annotated[str, typer.Option(help="Who decided: cli or ui.")] = "cli",
+) -> None:
+    """Partial migration: run more components self-hosted (after a passed migration)."""
+    with _handled():
+        from boomerang import pipeline
+        summary = pipeline.move_over(run_id, _ids(components) or [], by=by)
+    _print_scope(summary)
+    raise typer.Exit(_status_exit(summary.status))
+
+
+@app.command("move-back")
+def move_back(
+    run_id: RunId,
+    components: Components,
+    by: Annotated[str, typer.Option(help="Who decided: cli or ui.")] = "cli",
+) -> None:
+    """Partial migration: put components back on AWS, keep the rest self-hosted."""
+    with _handled():
+        from boomerang import pipeline
+        summary = pipeline.move_back(run_id, _ids(components) or [], by=by)
+    _print_scope(summary)
+    raise typer.Exit(_status_exit(summary.status))
+
+
+def _print_scope(summary: RunSummary) -> None:
+    scope = ", ".join(summary.scope.selfhosted) if summary.scope else "every movable component"
+    _print_summary(summary)
+    console.print(f"self-hosted now: {escape(scope)} · steps: {len(summary.steps)}")
 
 
 # ---------- verify and data (A) ----------

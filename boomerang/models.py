@@ -173,6 +173,7 @@ class Approval(BaseModel):               # L1, L2
     approved_by: str                     # "cli", "ui", "auto"
     ts: float
     plan_sha256: str                     # sha256 of pam.json + assessment.json as approved; execute() refuses if either changed
+    scope: list[str] | None = None       # docs/16: component ids approved to run self-hosted; None = all movable
 
 # ---------- Events & runs ----------
 Stage = Literal["scan", "assess", "approve", "delock", "generate", "verify", "fix", "data", "rollback", "report", "cost"]

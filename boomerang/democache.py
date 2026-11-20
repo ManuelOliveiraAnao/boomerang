@@ -34,7 +34,7 @@ from boomerang.fsutil import atomic_write_text
 from boomerang.redact import find_secrets, redact_with_map, secret_values
 
 MANIFEST = "manifest.json"
-LLM_SCHEMAS = ("AppModel", "Assessment", "FunctionRewrite", "FixResult")     # the LLM-facing models (docs/02 §3)
+LLM_SCHEMAS = ("AppModel", "Assessment", "FunctionRewrite", "FixResult", "DoctorExplanation")     # the LLM-facing models (docs/02 §3)
 ENTRY_FIELDS = ("key", "label", "provider", "model", "schema", "system", "user", "response")
 SECRET_FILE = "secrets.env"
 MAX_SCAN_BYTES = 5_000_000

@@ -41,6 +41,7 @@ Start with **[docs/00-start-here.md](docs/00-start-here.md)**.
 | [12 Costs](docs/12-costs.md) | Price table, usage, ops costs, egress rules |
 | [13 Security](docs/13-security.md) | Redaction, allowlists, scoped keys, approvals |
 | [14 Self-hosted target (Leaseweb example)](docs/14-leaseweb-target.md) | Generated files and how they're verified |
+| [17 Leaseweb AI server](docs/17-leaseweb-gpu.md) | Running the AI model on a Leaseweb server over an SSH tunnel |
 
 ## Quickstart (once the code exists)
 

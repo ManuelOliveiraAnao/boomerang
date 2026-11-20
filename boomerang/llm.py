@@ -206,7 +206,9 @@ def _call_ollama[T: BaseModel](settings: Settings, system: str, user: str, schem
     client = ollama.Client(host=settings.ollama_host, timeout=OLLAMA_TIMEOUT_S)
     messages: list[dict[str, str]] = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     usage: dict[str, int | None] = {"in": 0, "out": 0}
-    unreachable = (f"Ollama not reachable at {settings.ollama_host}; run 'ollama serve' "
+    start_it = ("open the SSH tunnel to the Leaseweb server (scripts/gpu-tunnel.ps1, docs/17)"
+                if settings.llm_location == "leaseweb" else "run 'ollama serve'")
+    unreachable = (f"Ollama not reachable at {settings.ollama_host}; {start_it} "
                    "or set BOOMERANG_LLM_PROVIDER=anthropic")
 
     for attempt in (1, 2):

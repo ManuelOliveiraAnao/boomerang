@@ -21,6 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_MODELS = {"ollama": "qwen2.5-coder:7b", "anthropic": "claude-opus-5-5"}
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+# Where the Ollama model really runs. OLLAMA_HOST can't tell: an SSH tunnel to a GPU server is also 127.0.0.1.
+LLM_LOCATIONS = {"local": "local", "leaseweb": "Leaseweb (EU)"}
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off", ""}
 
@@ -29,6 +31,7 @@ class Settings(BaseModel):
     provider: Literal["ollama", "anthropic"] = "ollama"
     model: str = DEFAULT_MODELS["ollama"]
     ollama_host: str = "http://127.0.0.1:11434"
+    llm_location: Literal["local", "leaseweb"] = "local"   # docs/17: Ollama on a Leaseweb server via SSH tunnel
     llm_mode: Literal["live", "record", "replay"] = "record"
     cache_dir: Path
     runs_dir: Path
@@ -44,7 +47,7 @@ class Settings(BaseModel):
     def llm_badge(self) -> str:
         """What the UI and the report must show (S5): local model, or the cloud fallback, clearly."""
         if self.provider == "ollama":
-            return f"ollama · {self.model} · local"
+            return f"ollama · {self.model} · {LLM_LOCATIONS[self.llm_location]}"
         return f"anthropic · {self.model} · cloud fallback"
 
 
@@ -98,8 +101,11 @@ def load_settings(environ: dict[str, str] | None = None, dotenv_path: Path | Non
     ollama_host = get("OLLAMA_HOST") or "http://127.0.0.1:11434"
     if "://" not in ollama_host:
         ollama_host = f"http://{ollama_host}"
+    location = (get("BOOMERANG_LLM_LOCATION") or "local").lower()
+    if location not in LLM_LOCATIONS:
+        raise ValueError(f"BOOMERANG_LLM_LOCATION={location!r}: use local or leaseweb")
     host = urlparse(ollama_host).hostname or ""
-    if provider == "ollama" and host not in LOCAL_HOSTS:
+    if provider == "ollama" and location == "local" and host not in LOCAL_HOSTS:
         warnings.warn(f"OLLAMA_HOST={ollama_host} is not on this machine: the model no longer runs locally (S5)",
                       stacklevel=2)
 
@@ -116,6 +122,7 @@ def load_settings(environ: dict[str, str] | None = None, dotenv_path: Path | Non
         provider=provider,
         model=model,
         ollama_host=ollama_host,
+        llm_location=location,
         llm_mode=mode,
         cache_dir=_dir(get("BOOMERANG_CACHE_DIR"), ".cache/llm", REPO_ROOT),
         runs_dir=_dir(get("BOOMERANG_RUNS_DIR"), "runs", REPO_ROOT),

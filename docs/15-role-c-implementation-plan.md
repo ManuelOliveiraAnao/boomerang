@@ -131,7 +131,7 @@ Rule: LLM-facing models (`AppModel`, `Finding`, `Assessment`, `FunctionRewrite`,
 - `model` default depends on the provider: `qwen2.5-coder:7b` for ollama, `claude-opus-5-5` for anthropic.
 - Validation: `llm_mode in {"live", "record", "replay"}`; `max_fix_attempts >= 0`; warn (don't fail) if `OLLAMA_HOST` isn't on `127.0.0.1`/`localhost` (S5).
 - Extra settings: `allow_fixtures: bool` (`BOOMERANG_ALLOW_FIXTURES`, default false, L9), `repo_root: Path` (from `Path(__file__).parents[1]`), `prompts_dir`.
-- `settings.llm_badge` → `"ollama · qwen2.5-coder:7b · local"` or `"anthropic · claude-opus-5-5 · cloud fallback"` (S5: the UI must say so).
+- `settings.llm_badge` → `"ollama · qwen2.5-coder:7b · local"`, `"ollama · qwen2.5-coder:14b · Leaseweb (EU)"` (`BOOMERANG_LLM_LOCATION=leaseweb`, docs/17) or `"anthropic · claude-opus-5-5 · cloud fallback"` (S5: the UI must say so).
 - Tests clear the cache with `get_settings.cache_clear()` and use `monkeypatch.setenv`.
 
 ### 2.4 `boomerang/events.py`

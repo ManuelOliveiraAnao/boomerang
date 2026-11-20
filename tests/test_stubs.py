@@ -13,15 +13,6 @@ P = Path(".")
 
 STUBS = [
     # (module, callable, args, kwargs, owner)
-    ("boomerang.scanner", "scan", (P, None), {}, "B"),
-    ("boomerang.scanner.static", "scan_static", (P,), {}, "B"),
-    ("boomerang.assess", "assess", (None, None), {}, "B"),
-    ("boomerang.lockin", "score", (None,), {}, "B"),
-    ("boomerang.generators.leaseweb", "make_secrets", (None,), {}, "B"),
-    ("boomerang.generators.leaseweb", "render", (None, {}), {}, "B"),
-    ("boomerang.lost", "build", (None, None, []), {}, "B"),
-    ("sovereign_sdk.kv", "resource", (), {}, "B"),
-    ("sovereign_sdk.kv", "ddl", (None,), {}, "B"),
     ("boomerang.lab", "up", (), {}, "A"),
     ("boomerang.lab", "status", (), {}, "A"),
     ("boomerang.lab", "reset", (), {}, "A"),
@@ -54,11 +45,7 @@ def test_stub_raises_not_built_with_owner(module, name, args, kwargs, owner):
 
 
 def test_adapter_classes_are_stubbed_too():
-    from sovereign_sdk.kv import Table
     from sovereign_sdk.queue import Queue
-
-    with pytest.raises(NotBuilt):
-        Table().get_item(Key={"order_id": "1"})
     with pytest.raises(NotBuilt):
         Queue().send_message(QueueUrl="q", MessageBody="{}")
 

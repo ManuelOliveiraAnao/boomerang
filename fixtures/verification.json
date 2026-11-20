@@ -1,0 +1,20 @@
+{
+  "checks": [
+    {"name": "compose config", "ok": true, "detail": "valid", "duration_s": 0.2},
+    {"name": "boot", "ok": true, "detail": "services healthy", "duration_s": 10.0},
+    {"name": "schema", "ok": true, "detail": "schema applied", "duration_s": 0.5},
+    {"name": "tests", "ok": true, "detail": "7/7", "duration_s": 4.0},
+    {"name": "health", "ok": true, "detail": "200", "duration_s": 0.1}
+  ],
+  "tests": {
+    "attempt": 1,
+    "platform": "leaseweb",
+    "passed": 7,
+    "failed": 0,
+    "errors": 0,
+    "total": 7,
+    "duration_s": 4.0,
+    "failures": [],
+    "output_tail": "7 passed"
+  }
+}

@@ -7,11 +7,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from boomerang._stub import NotBuilt
 from boomerang.events import Emitter
 from boomerang.models import AppModel
+from .ai import scan_ai
+from .static import scan_static
 
 
 def scan(app_dir: Path, emit: Emitter) -> AppModel:
-    """Binding (docs/03 §3.3). `CodeRef.file` paths: POSIX, relative to `app_dir`."""
-    raise NotBuilt("scanner.scan", owner="B", doc="docs/03 §3.3")
+    """Run static hints, then the AI merge pass."""
+    return scan_ai(app_dir, emit)

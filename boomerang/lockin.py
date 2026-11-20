@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
-from boomerang._stub import NotBuilt
 from boomerang.models import AppModel
 
 
 def score(pam: AppModel) -> int:
-    """Weighted by usage count; DynamoDB 90, SQS 70, S3 35, Lambda 95, IAM 80; Leaseweb providers 5–10."""
-    raise NotBuilt("lockin.score", owner="B", doc="docs/03 §3.4")
+    """Weighted by usage count; DynamoDB 90, SQS 70, S3 35, Lambda 95, IAM 80."""
+    weights = {
+        "aws.dynamodb": 90,
+        "aws.sqs": 70,
+        "aws.s3": 35,
+        "aws.lambda": 95,
+        "aws.iam": 80,
+        "aws.cloudwatch": 10,
+    }
+    return sum(
+        weights.get(component.provider, 10) * max(1, len(component.usages))
+        for component in pam.components
+    )

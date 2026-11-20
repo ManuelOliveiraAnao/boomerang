@@ -65,6 +65,9 @@ services:
     environment:
 {% if postgres_enabled %}
       DATABASE_URL: postgresql://shoplite:${POSTGRES_PASSWORD}@postgres:5432/shoplite
+{% if kv_schema_json %}
+      BOOMERANG_KV_SCHEMA: '{{ kv_schema_json }}'
+{% endif %}
 {% endif %}
 {% if rabbitmq_enabled %}
       AMQP_URL: amqp://shoplite:${RABBITMQ_PASSWORD}@rabbitmq:5672/shoplite
@@ -100,6 +103,9 @@ services:
     environment:
 {% if postgres_enabled %}
       DATABASE_URL: postgresql://shoplite:${POSTGRES_PASSWORD}@postgres:5432/shoplite
+{% if kv_schema_json %}
+      BOOMERANG_KV_SCHEMA: '{{ kv_schema_json }}'
+{% endif %}
 {% endif %}
 {% if rabbitmq_enabled %}
       AMQP_URL: amqp://shoplite:${RABBITMQ_PASSWORD}@rabbitmq:5672/shoplite

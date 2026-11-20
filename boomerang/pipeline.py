@@ -102,7 +102,7 @@ IAC_ROOT_NAMES = {"infra", "terraform", ".terraform", "serverless.yml", "serverl
 IAC_PATTERNS = ("*.tf", "*.tfvars", "*.tfstate", "*.tfstate.*", ".terraform.lock.hcl")
 # Files that belong to one execute() attempt; a re-run deletes them first.
 ATTEMPT_DIRS = ("leaseweb", "diffs", "verify", "data")
-ATTEMPT_FILES = ("delock.json", "assessment.final.json", "baseline.json", "tests.sha256", "lost.json", "report.md")
+ATTEMPT_FILES = ("delock.json", "delock-cache.json", "assessment.final.json", "baseline.json", "tests.sha256", "lost.json", "report.md")
 PROTECTED_GENERATED = (("app", "tests"), ("app", "sovereign_sdk"))
 
 # Round trip (docs/15 §7)
@@ -638,41 +638,79 @@ def _lock_in_after(ctx: RunContext) -> None:
     ctx.save()
 
 
+def _snapshot_kept_queues(ctx: RunContext, pam: AppModel, kept_queues: list[str],
+                          aws_env: dict[str, str]) -> dict[str, list[str]] | None:
+    try:
+        snapshot = provisioner_aws.snapshot_queues(pam, kept_queues, aws_env)
+    except Exception as e:  # noqa: BLE001 - best-effort preservation must not mask verify
+        ctx.emit(f"could not snapshot kept AWS queue(s) ({', '.join(kept_queues)}): {type(e).__name__}: {e}",
+                 "warning", step="verify")
+        return None
+    total = sum(len(msgs) for msgs in snapshot.values())
+    ctx.emit(f"preserved {total} pending message(s) in kept AWS queue(s) ({', '.join(kept_queues)}) across verify",
+             step="verify", preserved_messages=total, queues=kept_queues)
+    return snapshot
+
+
+def _restore_kept_queues(ctx: RunContext, pam: AppModel, snapshot: dict[str, list[str]],
+                         aws_env: dict[str, str]) -> None:
+    try:
+        restored = provisioner_aws.restore_queues(pam, snapshot, aws_env)
+    except Exception as e:  # noqa: BLE001 - never hide a verify failure behind a restore error
+        ctx.emit(f"could not restore kept AWS queue(s): {type(e).__name__}: {e}", "warning", step="verify")
+        return
+    total = sum(restored.values())
+    ctx.emit(f"restored {total} pending message(s) to kept AWS queue(s) ({', '.join(sorted(restored))})",
+             step="verify", restored_messages=total, queues=restored)
+
+
 def _verify_loop(ctx: RunContext, pam: AppModel) -> None:
     """L11: at most ``max_fix_attempts`` fixer rounds → at most 1 + that many verifications."""
     max_fix = get_settings().max_fix_attempts
+    aws_env: dict[str, str] | None = None
+    queue_snapshot: dict[str, list[str]] | None = None
     if scopes.is_hybrid(pam, ctx.scope):
-        _call(ctx, "provision hybrid AWS", provisioner_aws.provision, pam, ctx.emitter, default=None)
+        provisioned = _call(ctx, "provision hybrid AWS", provisioner_aws.provision, pam, ctx.emitter, default=None)
+        if isinstance(provisioned, dict):
+            aws_env = provisioned
+            kept_queues = [c.id for c in scopes.kept(pam, ctx.scope)
+                           if c.kind == "queue" and c.provider == "aws.sqs"]
+            if kept_queues:
+                queue_snapshot = _snapshot_kept_queues(ctx, pam, kept_queues, aws_env)
     _set_active_stack(ctx.run_id)                # verify replaces whatever stack is up (fixed host ports)
-    for attempt in range(1, max_fix + 2):
-        v: Verification = _call(ctx, "verify", verifier.verify, ctx.leaseweb, attempt, ctx.emitter,
-                                fixture="verification", model=Verification)
-        ctx.summary.verifications.append(v)
-        atomic_write_text(ctx.verify / f"attempt-{attempt}.json", v.model_dump_json(indent=2))
-        ctx.save()
-        tests = f" · tests {report.tests_ratio(v.tests)}" if v.tests else ""
-        if v.ok:
-            ctx.emit(f"attempt {attempt}: verified{tests}", "success", step="verify", attempt=attempt)
-            break
-        broken = [c.name for c in v.checks if not c.ok and c.name != "tests"]
-        if broken:
-            ctx.emit(f"attempt {attempt}: {', '.join(broken)} failed: template/boot problem (owners B/A); "
-                     "the AI can't fix compose files", "error", step="verify", attempt=attempt, failed=broken)
-            break
-        ctx.emit(f"attempt {attempt}: original tests failing{tests}", "warning", step="verify", attempt=attempt)
-        if v.tests is None:
-            break
-        if attempt > max_fix:
-            ctx.emit(f"no fix attempts left (BOOMERANG_MAX_FIX_ATTEMPTS={max_fix})", "warning", step="verify")
-            break
-        new: list[RewriteRecord] = _call(ctx, "fix", fixer.fix, ctx.app, ctx.original, pam, v.tests, attempt,
-                                         ctx.summary.rewrites, ctx.diffs, ctx.emitter, default=[])
-        ctx.summary.rewrites.extend(new)
-        _write_rewrites(ctx)
-        ctx.save()
-        if not any(r.accepted for r in new):
-            ctx.emit("the fixer found nothing it could fix: stopping", "warning", step="verify", attempt=attempt)
-            break
+    try:
+        for attempt in range(1, max_fix + 2):
+            v: Verification = _call(ctx, "verify", verifier.verify, ctx.leaseweb, attempt, ctx.emitter,
+                                    fixture="verification", model=Verification)
+            ctx.summary.verifications.append(v)
+            atomic_write_text(ctx.verify / f"attempt-{attempt}.json", v.model_dump_json(indent=2))
+            ctx.save()
+            tests = f" · tests {report.tests_ratio(v.tests)}" if v.tests else ""
+            if v.ok:
+                ctx.emit(f"attempt {attempt}: verified{tests}", "success", step="verify", attempt=attempt)
+                break
+            broken = [c.name for c in v.checks if not c.ok and c.name != "tests"]
+            if broken:
+                ctx.emit(f"attempt {attempt}: {', '.join(broken)} failed: template/boot problem (owners B/A); "
+                         "the AI can't fix compose files", "error", step="verify", attempt=attempt, failed=broken)
+                break
+            ctx.emit(f"attempt {attempt}: original tests failing{tests}", "warning", step="verify", attempt=attempt)
+            if v.tests is None:
+                break
+            if attempt > max_fix:
+                ctx.emit(f"no fix attempts left (BOOMERANG_MAX_FIX_ATTEMPTS={max_fix})", "warning", step="verify")
+                break
+            new: list[RewriteRecord] = _call(ctx, "fix", fixer.fix, ctx.app, ctx.original, pam, v.tests, attempt,
+                                             ctx.summary.rewrites, ctx.diffs, ctx.emitter, default=[])
+            ctx.summary.rewrites.extend(new)
+            _write_rewrites(ctx)
+            ctx.save()
+            if not any(r.accepted for r in new):
+                ctx.emit("the fixer found nothing it could fix: stopping", "warning", step="verify", attempt=attempt)
+                break
+    finally:
+        if queue_snapshot is not None and aws_env is not None:
+            _restore_kept_queues(ctx, pam, queue_snapshot, aws_env)
     if "verify" in ctx.summary.fixtures_used:
         _set_active_stack(None)                  # nothing was booted
 

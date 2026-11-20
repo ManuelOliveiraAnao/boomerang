@@ -184,3 +184,59 @@ def counts_shoplite(env: dict[str, str]) -> dict[str, int]:
                                                                     "ApproximateNumberOfMessagesNotVisible"])["Attributes"]
     n_msgs = int(attrs["ApproximateNumberOfMessages"]) + int(attrs["ApproximateNumberOfMessagesNotVisible"])
     return {"orders": n_items, "receipts": n_objects, "order_events": n_msgs}
+
+
+def _queue_name(c: Component, env: dict[str, str]) -> str:
+    return env.get(c.name_env_var, c.resource_name) if c.name_env_var else c.resource_name
+
+
+def _drain_queue(sqs, url: str) -> list[str]:
+    bodies: list[str] = []
+    empty_polls = 0
+    while empty_polls < 2:
+        msgs = sqs.receive_message(QueueUrl=url, MaxNumberOfMessages=10, WaitTimeSeconds=0,
+                                   VisibilityTimeout=60).get("Messages", [])
+        if not msgs:
+            empty_polls += 1
+            continue
+        empty_polls = 0
+        for m in msgs:
+            bodies.append(m["Body"])
+            sqs.delete_message(QueueUrl=url, ReceiptHandle=m["ReceiptHandle"])
+    return bodies
+
+
+def snapshot_queues(pam: AppModel, queue_ids: list[str], env: dict[str, str] | None = None) -> dict[str, list[str]]:
+    """Drain and return pending messages from the named SQS queues so a hybrid verify run
+    neither fails on stale seeded messages nor loses them before a later move-over."""
+    resolved = env or app_env(pam, resource_names(pam))
+    _, _, sqs, _ = _clients(resolved)
+    wanted = set(queue_ids)
+    snapshot: dict[str, list[str]] = {}
+    for c in pam.components:
+        if c.kind != "queue" or c.id not in wanted:
+            continue
+        url = sqs.get_queue_url(QueueName=_queue_name(c, resolved))["QueueUrl"]
+        snapshot[c.id] = _drain_queue(sqs, url)
+    return snapshot
+
+
+def restore_queues(pam: AppModel, snapshot: dict[str, list[str]], env: dict[str, str] | None = None) -> dict[str, int]:
+    """Empty any test messages left in the snapshotted SQS queues and re-send the original bodies."""
+    resolved = env or app_env(pam, resource_names(pam))
+    _, _, sqs, _ = _clients(resolved)
+    restored: dict[str, int] = {}
+    for c in pam.components:
+        if c.kind != "queue" or c.id not in snapshot:
+            continue
+        url = sqs.get_queue_url(QueueName=_queue_name(c, resolved))["QueueUrl"]
+        _drain_queue(sqs, url)
+        bodies = snapshot[c.id]
+        for idx, body in enumerate(bodies):
+            kwargs: dict[str, str] = {"QueueUrl": url, "MessageBody": body}
+            if c.fifo:
+                kwargs["MessageGroupId"] = "boomerang-restore"
+                kwargs["MessageDeduplicationId"] = f"restore-{c.id}-{idx}-{uuid.uuid4().hex[:8]}"
+            sqs.send_message(**kwargs)
+        restored[c.id] = len(bodies)
+    return restored

@@ -183,23 +183,78 @@ def _normalize_item(item: dict) -> str:
     return json.dumps(item, default=_decimal_json)
 
 
+def _to_decimal(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return Decimal(str(value))
+    if isinstance(value, list):
+        return [_to_decimal(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _to_decimal(v) for k, v in value.items()}
+    return value
+
+
 def _decode_item(value: Any) -> dict:
     if isinstance(value, str):
         return json.loads(value, parse_float=Decimal, parse_int=Decimal)
     if isinstance(value, dict):
-        return value
+        return _to_decimal(value)
     return {}
+
+
+_CONDITION_RE = re.compile(r"^\s*attribute_(exists|not_exists)\(\s*(#?[A-Za-z_][A-Za-z0-9_]*)\s*\)\s*$")
+
+
+def _parse_env_schema() -> dict[str, dict[str, Any]]:
+    raw = os.getenv("BOOMERANG_KV_SCHEMA", "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 class Table:
     def __init__(self, owner: KV, name: str) -> None:
         self.owner = owner
         self.name = _identifier(name)
+        self._pk_cache: str | None = None
+        self._sk_cache: str | None = None
+        self._cols_cache: list[str] | None = None
+        self._schema_loaded: bool = False
 
     def _connection(self):
         return self.owner._get_connection()
 
-    def _partition_key(self) -> str:
+    def invalidate_schema_cache(self) -> None:
+        self._pk_cache = None
+        self._sk_cache = None
+        self._cols_cache = None
+        self._schema_loaded = False
+
+    def _load_schema(self) -> None:
+        if self._schema_loaded:
+            return
+        env_entry = _parse_env_schema().get(self.name)
+        if isinstance(env_entry, dict) and isinstance(env_entry.get("partition_key"), str):
+            pk = _identifier(env_entry["partition_key"])
+            sk_raw = env_entry.get("sort_key")
+            sk = _identifier(sk_raw) if isinstance(sk_raw, str) and sk_raw else None
+            cols_raw = env_entry.get("columns")
+            cols = (
+                [_identifier(str(col)) for col in cols_raw]
+                if isinstance(cols_raw, list)
+                else ([pk] + ([sk] if sk else []))
+            )
+            self._pk_cache = pk
+            self._sk_cache = sk
+            self._cols_cache = cols
+            self._schema_loaded = True
+            return
+
         with self.owner._lock:
             with self._connection().cursor() as cursor:
                 cursor.execute(
@@ -210,37 +265,12 @@ class Table:
                     JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
                     WHERE c.relname = %s AND i.indisprimary
                     ORDER BY array_position(i.indkey, a.attnum)
-                    LIMIT 1
                     """,
                     (self.name,),
                 )
-                row = cursor.fetchone()
-        if not row:
-            raise RuntimeError(f"No primary key found for table {self.name}")
-        return str(row[0])
-
-    def _sort_key(self) -> str | None:
-        with self.owner._lock:
-            with self._connection().cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT a.attname
-                    FROM pg_index i
-                    JOIN pg_class c ON c.oid = i.indrelid
-                    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
-                    WHERE c.relname = %s AND i.indisprimary
-                    ORDER BY array_position(i.indkey, a.attnum)
-                    OFFSET 1
-                    LIMIT 1
-                    """,
-                    (self.name,),
-                )
-                row = cursor.fetchone()
-        return str(row[0]) if row else None
-
-    def _data_columns(self) -> list[str]:
-        with self.owner._lock:
-            with self._connection().cursor() as cursor:
+                pk_rows = [str(row[0]) for row in cursor.fetchall()]
+                if not pk_rows:
+                    raise RuntimeError(f"No primary key found for table {self.name}")
                 cursor.execute(
                     """
                     SELECT column_name
@@ -250,7 +280,75 @@ class Table:
                     """,
                     (self.name,),
                 )
-                return [str(row[0]) for row in cursor.fetchall()]
+                cols = [str(row[0]) for row in cursor.fetchall()]
+        self._pk_cache = pk_rows[0]
+        self._sk_cache = pk_rows[1] if len(pk_rows) > 1 else None
+        self._cols_cache = cols
+        self._schema_loaded = True
+
+    def _partition_key(self) -> str:
+        self._load_schema()
+        assert self._pk_cache is not None
+        return self._pk_cache
+
+    def _sort_key(self) -> str | None:
+        self._load_schema()
+        return self._sk_cache
+
+    def _data_columns(self) -> list[str]:
+        self._load_schema()
+        return list(self._cols_cache or [])
+
+    def _fetch_item(self, Key: dict, partition_key: str, sort_key: str | None) -> dict | None:
+        if partition_key not in Key:
+            raise ValueError(f"Missing partition key {partition_key}")
+        sql = f"SELECT data FROM {_quoted(self.name)} WHERE {_quoted(partition_key)} = %s"
+        parameters: list[Any] = [str(Key[partition_key])]
+        if sort_key:
+            if sort_key not in Key:
+                raise ValueError(f"Missing sort key {sort_key}")
+            sql += f" AND {_quoted(sort_key)} = %s"
+            parameters.append(str(Key[sort_key]))
+        with self._connection().cursor() as cursor:
+            cursor.execute(sql, parameters)
+            row = cursor.fetchone()
+        if not row:
+            return None
+        return _decode_item(row[0])
+
+    def _check_condition(
+        self,
+        condition: str,
+        *,
+        existing_item: dict | None,
+        partition_key: str,
+        sort_key: str | None,
+        expression_attribute_names: dict[str, str] | None = None,
+    ) -> None:
+        match = _CONDITION_RE.match(condition)
+        if not match:
+            raise UnsupportedFeature(f"Unsupported ConditionExpression: {condition}")
+        op, raw_attr = match.group(1), match.group(2)
+        if raw_attr.startswith("#"):
+            names = expression_attribute_names or {}
+            if raw_attr in names:
+                attr_name = _identifier(names[raw_attr])
+            elif raw_attr == "#pk":
+                attr_name = partition_key
+            else:
+                raise UnsupportedFeature(f"Unknown condition attribute name: {raw_attr}")
+        else:
+            attr_name = _identifier(raw_attr)
+
+        if attr_name == partition_key or (sort_key is not None and attr_name == sort_key):
+            present = existing_item is not None
+        else:
+            present = existing_item is not None and attr_name in existing_item
+
+        if op == "exists" and not present:
+            raise ConditionalCheckFailedException()
+        if op == "not_exists" and present:
+            raise ConditionalCheckFailedException()
 
     def put_item(self, Item: dict, ConditionExpression: str | None = None) -> dict:
         with self.owner._lock:
@@ -261,26 +359,14 @@ class Table:
             if sort_key and sort_key not in Item:
                 raise ValueError(f"Missing sort key {sort_key}")
 
-            partition_value = str(Item[partition_key])
             if ConditionExpression:
-                exists = ConditionExpression in {
-                    f"attribute_exists({partition_key})",
-                    "attribute_exists(#pk)",
-                }
-                not_exists = ConditionExpression in {
-                    f"attribute_not_exists({partition_key})",
-                    "attribute_not_exists(#pk)",
-                }
-                if not exists and not not_exists:
-                    raise UnsupportedFeature(f"Unsupported ConditionExpression: {ConditionExpression}")
-                with self._connection().cursor() as cursor:
-                    sql = f"SELECT 1 FROM {_quoted(self.name)} WHERE {_quoted(partition_key)} = %s"
-                    cursor.execute(sql, (partition_value,))
-                    row = cursor.fetchone()
-                if not_exists and row:
-                    raise ConditionalCheckFailedException()
-                if exists and not row:
-                    raise ConditionalCheckFailedException()
+                existing = self._fetch_item(Item, partition_key, sort_key)
+                self._check_condition(
+                    ConditionExpression,
+                    existing_item=existing,
+                    partition_key=partition_key,
+                    sort_key=sort_key,
+                )
 
             columns = [partition_key] + ([sort_key] if sort_key else [])
             values = [str(Item[partition_key])] + ([str(Item[sort_key])] if sort_key else [])
@@ -310,21 +396,10 @@ class Table:
         with self.owner._lock:
             partition_key = self._partition_key()
             sort_key = self._sort_key()
-            if partition_key not in Key:
-                raise ValueError(f"Missing partition key {partition_key}")
-            sql = f"SELECT data FROM {_quoted(self.name)} WHERE {_quoted(partition_key)} = %s"
-            parameters: list[Any] = [str(Key[partition_key])]
-            if sort_key:
-                if sort_key not in Key:
-                    raise ValueError(f"Missing sort key {sort_key}")
-                sql += f" AND {_quoted(sort_key)} = %s"
-                parameters.append(str(Key[sort_key]))
-            with self._connection().cursor() as cursor:
-                cursor.execute(sql, parameters)
-                row = cursor.fetchone()
-        if not row:
+            item = self._fetch_item(Key, partition_key, sort_key)
+        if item is None:
             return {}
-        return {"Item": _decode_item(row[0])}
+        return {"Item": item}
 
     def update_item(
         self,
@@ -335,21 +410,21 @@ class Table:
         ConditionExpression: str | None = None,
     ) -> dict:
         with self.owner._lock:
-            item = self.get_item(Key).get("Item")
-            if item is None:
-                raise ConditionalCheckFailedException()
             if not UpdateExpression.strip().upper().startswith("SET "):
                 raise UnsupportedFeature("Only SET update expressions are supported")
             names = ExpressionAttributeNames or {}
             values = ExpressionAttributeValues or {}
+            assignments: list[tuple[str, Any]] = []
             for assignment in UpdateExpression.strip()[4:].split(","):
+                if "=" not in assignment:
+                    raise UnsupportedFeature(f"Invalid update assignment: {assignment}")
                 left, right = (part.strip() for part in assignment.split("=", 1))
                 target = names.get(left, left)
                 if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", target):
                     raise UnsupportedFeature(f"Invalid update target: {target}")
                 if right not in values:
                     raise UnsupportedFeature(f"Unknown update value: {right}")
-                item[target] = values[right]
+                assignments.append((target, values[right]))
 
             partition_key = self._partition_key()
             sort_key = self._sort_key()
@@ -357,6 +432,20 @@ class Table:
             for key in primary:
                 if key not in Key:
                     raise ValueError(f"Missing key {key}")
+
+            existing = self._fetch_item(Key, partition_key, sort_key)
+            if ConditionExpression:
+                self._check_condition(
+                    ConditionExpression,
+                    existing_item=existing,
+                    partition_key=partition_key,
+                    sort_key=sort_key,
+                    expression_attribute_names=ExpressionAttributeNames,
+                )
+            item = dict(existing) if existing is not None else dict(Key)
+            for target, value in assignments:
+                item[target] = value
+
             replace_columns = list(primary)
             replace_values = [str(Key[key]) for key in primary]
             for column in self._data_columns():

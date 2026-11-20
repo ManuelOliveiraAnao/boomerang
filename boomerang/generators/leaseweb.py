@@ -88,6 +88,25 @@ def render(pam: AppModel, secrets: dict[str, str], scope: Scope | Iterable[str] 
         for component in kept_movable:
             if component.name_env_var:
                 aws_environment[component.name_env_var] = component.resource_name
+    kv_schema: dict[str, dict[str, object]] = {}
+    for component in kv_components:
+        pk = component.partition_key.name if component.partition_key else None
+        if not pk:
+            continue
+        sk = component.sort_key.name if component.sort_key else None
+        columns = [pk] + ([sk] if sk else [])
+        for idx in component.indexes:
+            if idx.partition_key and idx.partition_key.name not in columns:
+                columns.append(idx.partition_key.name)
+            if idx.sort_key and idx.sort_key.name not in columns:
+                columns.append(idx.sort_key.name)
+        kv_schema[component.resource_name] = {
+            "partition_key": pk,
+            "sort_key": sk,
+            "columns": columns,
+        }
+    kv_schema_json = json.dumps(kv_schema, separators=(",", ":"), sort_keys=True) if kv_schema else ""
+
     context = {
         "database_password": secrets["POSTGRES_PASSWORD"],
         "rabbit_password": secrets["RABBITMQ_PASSWORD"],
@@ -97,6 +116,7 @@ def render(pam: AppModel, secrets: dict[str, str], scope: Scope | Iterable[str] 
         "rabbitmq_enabled": bool(queue_components),
         "seaweed_enabled": bool(object_components),
         "queue_components": queue_components,
+        "kv_schema_json": kv_schema_json,
         "aws_variables": aws_variables,
         "aws_environment": aws_environment,
     }
@@ -116,6 +136,7 @@ def render(pam: AppModel, secrets: dict[str, str], scope: Scope | Iterable[str] 
         "ORDERS_TABLE=orders",
         "RECEIPTS_BUCKET=receipts",
         "ORDER_EVENTS_QUEUE=order-events",
+        *([f"BOOMERANG_KV_SCHEMA={kv_schema_json}"] if kv_schema_json else []),
         *(
             [
                 "AWS_REGION=us-east-1",
@@ -153,9 +174,9 @@ def render(pam: AppModel, secrets: dict[str, str], scope: Scope | Iterable[str] 
         GeneratedFile(path="app/requirements.txt", content=render_template("app-requirements.txt.j2")),
     ]
     if rabbitmq:
-        files.append(GeneratedFile(path="rabbitmq/definitions.json", content=rabbitmq))
+        files.append(GeneratedFile(path="rabbitmq/definitions.json", content=rabbitmq, secret=True))
     if seaweed:
-        files.append(GeneratedFile(path="seaweedfs/s3.json", content=seaweed))
+        files.append(GeneratedFile(path="seaweedfs/s3.json", content=seaweed, secret=True))
     if kv_components:
         files.append(GeneratedFile(path="schema.sql", content=schema))
     return files

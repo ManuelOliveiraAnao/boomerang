@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import ast
 import difflib
+import hashlib
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -59,6 +60,7 @@ from boomerang.slicer import BOM, FunctionNode, FunctionSlice, ModuleInfo
 
 ONE_TO_ONE = "1:1 mapping, checked by code"
 MODULE = "<module>"                                  # RewriteRecord.function for module-level config changes
+DELOCK_CACHE = "delock-cache.json"                   # run-local cache of verified AI function rewrites (move-over/back)
 ADAPTER_OF_KIND = {"kv_table": "kv", "queue": "queue", "object_store": "storage"}
 AI_KINDS = {"kv_table", "queue"}
 HELPER_IMPORTS = {"Key": "from boto3.dynamodb.conditions import Key",
@@ -140,6 +142,7 @@ class _Outcome:
     new_source: str | None = None     # accepted and changed → stitched
     rewrite: FunctionRewrite | None = None
     findings: list[Finding] = field(default_factory=list)
+    cache_entry: tuple[str, dict[str, Any]] | None = None
 
 
 # ---------- the run ----------
@@ -148,9 +151,7 @@ def _run(app_dir: Path, pam: AppModel, assessment: Assessment, emit: Emitter | N
          diffs_dir: Path, out_dir: Path, scope: list[str] | None = None) -> _Result:
     app_dir = app_dir.resolve()
     migrated, in_play = _decide(pam, assessment, emit, scope)
-    # partial migration (docs/16): components that stay on AWS keep their boto3 calls; the prompt says so
-    kept = [f"{c.id} ({c.provider})" for c in pam.components
-            if scope is not None and c.kind in ADAPTER_OF_KIND and c.provider.startswith("aws.") and c.id not in scope]
+    cache = _load_delock_cache(out_dir)
 
     # 2. slice: functions that use a migrated kv/queue component
     sliced = slicer.functions_with_usages(app_dir, pam, emit)
@@ -166,22 +167,23 @@ def _run(app_dir: Path, pam: AppModel, assessment: Assessment, emit: Emitter | N
         if ctx is None:
             continue
         ctxs[rel] = ctx
+        file_kept = _file_kept(app_dir, rel, ctx, pam, scope)
         selected = [(sl, [c for c in comps if c.id in migrated and c.kind in AI_KINDS])
                     for sl, comps in sliced.get(rel, [])]
         for sl, comps in _merge_nested([(sl, comps) for sl, comps in selected if comps], emit):
             node = next(n for n, q in ctx.info.functions if n.lineno == sl.start and q == sl.qualname)
             lines = [u.line for c in comps for u in c.usages
                      if slicer.normalize_path(u.file, app_dir) == rel and sl.start <= u.line <= sl.end]
-            jobs.append(_Job(ctx, node, sl, comps, lines, kept))
+            jobs.append(_Job(ctx, node, sl, comps, lines, file_kept))
 
-    # 3. per function: code first (L14), then the AI
+    # 3. per function: code first (L14), then run-local cache, then the AI
     settings = get_settings()
     workers = ANTHROPIC_PARALLEL if settings.provider == "anthropic" and len(jobs) > 1 else 1
     if workers == 1:
-        outcomes = [_process(job, emit) for job in jobs]
+        outcomes = [_process(job, emit, cache) for job in jobs]
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            outcomes = list(pool.map(lambda job: _process(job, emit), jobs))
+            outcomes = list(pool.map(lambda job: _process(job, emit, cache), jobs))
 
     # 4–7, 9: stitch, swap, imports, compile check, diffs — file by file
     records: list[RewriteRecord] = []
@@ -189,6 +191,7 @@ def _run(app_dir: Path, pam: AppModel, assessment: Assessment, emit: Emitter | N
     for o in outcomes:
         by_file.setdefault(o.job.slice.file, []).append(o)
     changed_files = 0
+    cache_dirty = False
     for rel, ctx in ctxs.items():
         file_outcomes = by_file.get(rel, [])
         module_record, wrote = _apply_file(app_dir, ctx, file_outcomes, diffs_dir, out_dir, emit)
@@ -196,6 +199,15 @@ def _run(app_dir: Path, pam: AppModel, assessment: Assessment, emit: Emitter | N
         if module_record is not None:
             records.append(module_record)
         changed_files += wrote
+        for o in file_outcomes:
+            if o.record.accepted and o.cache_entry is not None:
+                ckey, centry = o.cache_entry
+                if cache.get(ckey) != centry:
+                    cache[ckey] = centry
+                    cache_dirty = True
+
+    if cache_dirty:
+        _save_delock_cache(out_dir, cache)
 
     # 8. residual lock-in (static scan, L16)
     _residual_check(app_dir, emit)
@@ -205,6 +217,69 @@ def _run(app_dir: Path, pam: AppModel, assessment: Assessment, emit: Emitter | N
     _write_outputs(out_dir, records, assessment, findings)
     _summary(records, changed_files, emit)
     return _Result(records, rewrites, findings)
+
+
+def _file_kept(app_dir: Path, rel: str, ctx: _FileCtx, pam: AppModel, scope: list[str] | None) -> list[str]:
+    """Kept AWS components that this file actually touches (by usage or boto3 client factory).
+
+    Keeping this file-scoped ensures single-service files (e.g. app/db.py) get identical prompts
+    and cache keys across full and hybrid scopes, while mixed files still see every kept sibling.
+    """
+    if scope is None:
+        return []
+    file_adapters: set[str] = set()
+    for node in ast.walk(ctx.info.tree):
+        if isinstance(node, ast.Call):
+            svc = rules.boto3_service(node)
+            if svc in SWAPS:
+                file_adapters.add(SWAPS[svc][0])
+    out: list[str] = []
+    for c in pam.components:
+        if c.kind not in ADAPTER_OF_KIND or not c.provider.startswith("aws.") or c.id in scope:
+            continue
+        used_here = any(slicer.normalize_path(u.file, app_dir) == rel for u in c.usages)
+        client_here = ADAPTER_OF_KIND[c.kind] in file_adapters
+        if used_here or client_here:
+            out.append(f"{c.id} ({c.provider})")
+    return out
+
+
+def _load_delock_cache(out_dir: Path) -> dict[str, dict[str, Any]]:
+    path = Path(out_dir) / DELOCK_CACHE
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_delock_cache(out_dir: Path, cache: dict[str, dict[str, Any]]) -> None:
+    if not cache:
+        return
+    atomic_write_text(
+        Path(out_dir) / DELOCK_CACHE,
+        json.dumps(cache, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+    )
+
+
+def _delock_cache_key(job: _Job, components: str, context: str) -> str:
+    settings = get_settings()
+    payload = json.dumps(
+        [
+            settings.provider,
+            settings.model,
+            job.slice.file,
+            job.slice.qualname,
+            job.slice.source,
+            context,
+            components,
+            job.kept,
+        ],
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _decide(pam: AppModel, assessment: Assessment, emit: Emitter | None,
@@ -303,7 +378,7 @@ def _merge_nested(items: list[tuple[FunctionSlice, list[Component]]], emit: Emit
 
 # ---------- one function ----------
 
-def _process(job: _Job, emit: Emitter | None) -> _Outcome:
+def _process(job: _Job, emit: Emitter | None, cache: dict[str, dict[str, Any]] | None = None) -> _Outcome:
     sl, ctx = job.slice, job.ctx
     where = f"{sl.file}:{sl.qualname}"
     base = {"file": sl.file, "function": sl.qualname}
@@ -322,10 +397,31 @@ def _process(job: _Job, emit: Emitter | None) -> _Outcome:
         _emit(emit, f"{where}: kept the original: {reason}", "error", **base)
         return _rejected(job, reason, analysis="", unsupported=[])
 
-    tmpl = _template()
-    system = str(tmpl.module.system(adapter_interface=_adapter_interface()))
     components = _components_json(job)
     context = _context_after_swap(job)
+    ckey = _delock_cache_key(job, components, context)
+    if cache is not None and isinstance(cache.get(ckey), dict):
+        cached = cache[ckey]
+        cached_source = cached.get("new_source")
+        if isinstance(cached_source, str):
+            candidate, violations = _judge(job, cached_source, emit)
+            if not violations:
+                analysis = str(cached.get("analysis", ""))
+                unsupported = [str(item) for item in (cached.get("unsupported") or [])]
+                changed = slicer.normalize_source(candidate) != slicer.normalize_source(sl.source)
+                _emit(emit, f"{where}: reused cached de-lock rewrite ✅ (no AI call)", "success",
+                      **base, kind="ai", cached_delock=True)
+                findings = [_finding(job, item[:80], "amber", item) for item in unsupported]
+                for item in unsupported:
+                    _emit(emit, f"{where}: unsupported → 🟠 {item}", "warning", **base, unsupported=item)
+                record = RewriteRecord(file=sl.file, function=sl.qualname, kind="ai", accepted=True,
+                                       analysis=analysis, unsupported=unsupported)
+                rewrite = FunctionRewrite(analysis=analysis, new_source=candidate, unsupported=unsupported)
+                return _Outcome(job, record, new_source=candidate if changed else None, rewrite=rewrite,
+                                findings=findings, cache_entry=(ckey, cached))
+
+    tmpl = _template()
+    system = str(tmpl.module.system(adapter_interface=_adapter_interface()))
     user = str(tmpl.module.user(file=sl.file, qualname=sl.qualname, components=components, context=context,
                                 source=_data(sl.source), previous=None, kept=job.kept))
 
@@ -367,7 +463,15 @@ def _process(job: _Job, emit: Emitter | None) -> _Outcome:
     record = RewriteRecord(file=sl.file, function=sl.qualname, kind="ai", accepted=True,
                            analysis=answer.analysis, unsupported=list(answer.unsupported))
     rewrite = FunctionRewrite(analysis=answer.analysis, new_source=candidate, unsupported=list(answer.unsupported))
-    return _Outcome(job, record, new_source=candidate if changed else None, rewrite=rewrite, findings=findings)
+    cache_entry = (ckey, {
+        "file": sl.file,
+        "function": sl.qualname,
+        "new_source": candidate,
+        "analysis": answer.analysis,
+        "unsupported": list(answer.unsupported),
+    })
+    return _Outcome(job, record, new_source=candidate if changed else None, rewrite=rewrite,
+                    findings=findings, cache_entry=cache_entry)
 
 
 def _judge(job: _Job, raw: str, emit: Emitter | None) -> tuple[str, list[str]]:

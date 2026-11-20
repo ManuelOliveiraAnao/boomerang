@@ -10,6 +10,11 @@ Source branch:
 origin/member-b-after-c1
 ```
 
+Important: this branch contains older copies of A/C shared files and some
+older A modules. Treat it as the source of Member B implementation, not as
+the authority for A/C shared files. The current integration handoff is
+`docs/roles/A-handoff-for-integration.md`.
+
 Member B owns:
 
 - static and AI scanner;
@@ -24,7 +29,7 @@ Keep these contracts unchanged:
 
 | Contract | Must remain |
 |---|---|
-| `boomerang/models.py` | C1/C2 Pydantic types: `AppModel`, `Assessment`, `Finding`, `LostItem`, `GeneratedFile` |
+| `boomerang/models.py` | Latest C Pydantic types: `AppModel`, `Assessment`, `Finding`, `LostItem`, `GeneratedFile` |
 | Scanner return | `AppModel` |
 | Assessment return | `Assessment` |
 | Lost report return | `list[LostItem]` |
@@ -54,7 +59,7 @@ May be changed:
 - wording of prompts;
 - small AI fallback behavior;
 - emitter calls;
-- Pydantic conversion if C1/C2 types changed.
+- Pydantic conversion if C types changed.
 
 Must not be changed:
 
@@ -79,7 +84,7 @@ May be changed:
 Must not be changed:
 
 - AI cannot turn green/amber/red into a lower light;
-- `Assessment.findings` must use C1/C2 `Finding`;
+- `Assessment.findings` must use C's `Finding`;
 - output must remain `Assessment`.
 
 ### KV Adapter
@@ -179,18 +184,48 @@ May be changed:
 
 Must not be changed:
 
-- output must use C1/C2 `LostItem`;
+- output must use C's `LostItem`;
 - status meanings.
 
 ## Conflict Resolution
 
+Before resolving, start from the latest A+C integration and merge Member B
+into it. The rehearsed integration found eight shared-file conflicts:
+
+The exact conflict count can differ as A/C change, so treat the file rules
+below as authoritative. The latest merge check between A and B also predicts
+conflicts in A-owned modules such as `lab.py`, `provisioner_aws.py`,
+`verifier.py`, and `datamover.py`; keep the latest A/C side for those files.
+
 | File | Resolution |
 |---|---|
-| `boomerang/models.py` | Do not replace C1/C2 types |
+| `boomerang/__init__.py` | Keep current A+C version |
+| `sovereign_sdk/__init__.py` | Keep current A+C version |
+| `boomerang/events.py` | Keep current A+C emitter API |
+| `boomerang/cli.py` | Keep current C CLI |
+| `boomerang/lab.py` | Keep latest A implementation |
+| `boomerang/provisioner_aws.py` | Keep latest A implementation |
+| `boomerang/verifier.py` | Keep latest A implementation |
+| `boomerang/datamover.py` | Keep latest A implementation |
+
+After merging, verify that no latest-A file changed unintentionally:
+
+```bash
+git diff origin/role-a-platform-plan -- \
+  sovereign_sdk/queue.py \
+  boomerang/verifier.py \
+  tests/sovereign_sdk/test_queue.py
+```
+
+This should be empty when the latest A branch is already the merge base.
+
+| File | Resolution |
+|---|---|
+| `boomerang/models.py` | Keep latest C types |
 | `boomerang/assess.py` | Keep B rules and Pydantic return types |
-| `boomerang/scanner/static.py` | Keep B scanner, return C1 `AppModel` |
+| `boomerang/scanner/static.py` | Keep B scanner, return C's `AppModel` |
 | `boomerang/scanner/ai.py` | Keep B merge logic and C LLM call |
-| `boomerang/generators/leaseweb.py` | Keep B generator and C `GeneratedFile` |
+| `boomerang/generators/leaseweb.py` | Keep B generator and C `GeneratedFile`; keep C pipeline ownership for file writing |
 | `boomerang/generators/templates/**` | Keep B templates |
 | `boomerang/lost.py` | Keep B mapping and C `LostItem` |
 | `boomerang/lockin.py` | Keep B weights and score |
@@ -203,10 +238,25 @@ Must not be changed:
 
 For shared files, prefer:
 
-- C1/C2 public types;
+- C public types;
 - B Member B behavior;
 - A/RabbitMQ shared behavior;
 - no duplicate implementation.
+
+## Tests That Become Stale
+
+After merging B successfully, remove or update tests that still assert that
+Member B code is a C stub. The rehearsed integration identified these:
+
+- nine `test_stubs.py` entries for scanner, assessment, lock-in, generator,
+  lost report and KV;
+- `test_adapter_classes_are_stubbed_too` for `KV.Table`;
+- `test_unbuilt_command_exits_3_and_names_the_owner` for the scanner;
+- the delock test event assertion that expects
+  `"scan_static is not built yet"`.
+
+Do not replace these by weakening A or C tests. Remove them because the
+Member B implementation now satisfies them.
 
 ## Minimum Validation
 
@@ -229,10 +279,15 @@ docker run --name boomerang-member-b-kv \
   -e POSTGRES_PASSWORD=shoplite \
   -p 54329:5432 \
   -d postgres:16-alpine
+```
 
-set DATABASE_URL=postgresql://shoplite:shoplite@127.0.0.1:54329/shoplite
+PowerShell:
+
+```powershell
+$env:DATABASE_URL='postgresql://shoplite:shoplite@127.0.0.1:54329/shoplite'
 python -m pytest -q tests/sovereign_sdk/test_kv.py
 docker rm -f boomerang-member-b-kv
+Remove-Item Env:DATABASE_URL
 ```
 
 Generated Compose:
@@ -240,6 +295,22 @@ Generated Compose:
 ```bash
 docker compose -f runs/<run-id>/leaseweb/docker-compose.yml config -q
 ```
+
+## Known Integration Status
+
+The latest A integration handoff reported:
+
+- A alone: 57/57 integration-style tests passing;
+- the rehearsed A+C+B merge: 441 unit tests passing after stale stub tests
+  are updated, with 12 stale stub assertions removed;
+- integration: 58 passed, 1 skipped in the rehearsed environment;
+- storage/S3 integration needs explicit S3 test credentials;
+- full verification of a real generated ShopLite stack, real data mover,
+  and full round trip remain follow-up work.
+
+Run Member B tests separately from A/C integration tests while C and A are
+still changing. Member B work does not become invalid if A/C integration
+tests are temporarily red.
 
 ## Member B Done Criteria
 
@@ -250,7 +321,7 @@ The merge is acceptable only if:
 - traffic lights include green/amber/red;
 - KV tests pass against real Postgres;
 - both KV Key condition forms work;
-- generator returns C1 `GeneratedFile` values;
+- generator returns C's `GeneratedFile` values;
 - RabbitMQ arguments match A's adapter;
 - `laptop.env` and `secrets.env` contain real local values;
 - secret files are ignored by Git;

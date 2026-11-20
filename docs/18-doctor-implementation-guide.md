@@ -249,6 +249,18 @@ explanation, and `boomerang doctor fix <id> restart_service postgres --by cli` b
 - Buttons call `ui.runner.start("doctor-fix", run_id, …)`, which maps to `boomerang doctor fix <id> <action> <target>
   --by ui`, and `"doctor"` for a fresh diagnosis. `move_back` asks for a second confirmation (risk high).
 
+> **Status: done** on branch `doctor-d` (20 Nov, 14:55). `ui/components/doctor.py` (a **Doctor** tab between "Data &
+> round trip" and "Costs"), `fixtures/doctor-demo.json` (a `db_down` incident whose evidence matches what piece 1
+> returned on real Docker), runner commands `doctor`, `doctor-fix` and `doctor-break` (`runner.start(..., args=[...])`),
+> `tests/test_doctor_ui.py`.
+> - **The tab:** the incident (severity, root cause, what users lose, service, component, rule), the AI's
+>   explanation labelled with where the model ran (or a note that the rules stand alone), the evidence with status
+>   icons and collapsible logs (secrets masked), the ranked fixes with their risk (high risk asks for confirmation),
+>   and the applied fixes. Healthy state: every service green, with what resolved the last incident.
+> - **Modes:** preview on demo data (fixes simulated; "move back" also moves the service in the Placement tab),
+>   live once `boomerang.doctor.run` exists (C, §5), read only otherwise.
+> - **For C:** a real incident counts as resolved when the last entry in `applied` has `ok: true`.
+
 ---
 
 ## 7. Order of work (~75 minutes)

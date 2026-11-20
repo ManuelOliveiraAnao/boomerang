@@ -1,0 +1,47 @@
+{
+  "run_id": "demo",
+  "at": 1795185600.0,
+  "severity": "down",
+  "llm": "ollama · qwen2.5-coder:14b · Leaseweb (EU)",
+  "explanation": "The Postgres container on your servers stopped, so every request that reads or writes an order fails with \"connection refused\". Customers can't check out or see their order history; receipts and the order queue are unaffected. Restarting Postgres should bring checkout back, since its data volume is intact; if it keeps failing, move orders back to AWS while you investigate.",
+  "diagnosis": {
+    "rule": "db_down",
+    "root_cause": "The database (Postgres) is down, so the app can't read or write orders.",
+    "service": "postgres",
+    "component_id": "orders",
+    "impact": ["Checkout fails", "Order history unavailable"],
+    "severity": "down",
+    "evidence": [
+      {"source": "container", "service": "postgres", "ok": false, "detail": "Exited (0) 2 seconds ago",
+       "lines": [], "data": {"state": "exited", "health": "", "exit_code": 0}},
+      {"source": "probe", "service": "postgres", "ok": false, "detail": "127.0.0.1:5432: connection refused",
+       "lines": [], "data": {}},
+      {"source": "health", "service": "api", "ok": false,
+       "detail": "health check failed: HTTP 500 {'status': 'error', 'db': 'unreachable'}", "lines": [],
+       "data": {"url": "http://127.0.0.1:8080/health"}},
+      {"source": "logs", "service": "api", "ok": false, "detail": "3 error line(s) in the last 6",
+       "lines": [
+         "INFO:     127.0.0.1:51034 - \"GET /health HTTP/1.1\" 200 OK",
+         "INFO:     172.18.0.1:51102 - \"POST /orders HTTP/1.1\" 500 Internal Server Error",
+         "ERROR:    Exception in ASGI application",
+         "psycopg.OperationalError: connection to server at \"postgres\" (172.18.0.2), port 5432 failed: Connection refused",
+         "INFO:     172.18.0.1:51110 - \"GET /orders?customer_id=c-17 HTTP/1.1\" 500 Internal Server Error",
+         "ERROR:    Exception in ASGI application"
+       ],
+       "data": {"errors": 3}},
+      {"source": "logs", "service": "postgres", "ok": true, "detail": "3 lines, no errors",
+       "lines": [
+         "LOG:  received fast shutdown request",
+         "LOG:  checkpoint complete: wrote 19 buffers (0.1%)",
+         "LOG:  database system is shut down"
+       ],
+       "data": {"errors": 0}}
+    ],
+    "actions": [
+      {"id": "restart_service", "target": "postgres", "label": "Restart Postgres", "risk": "low"},
+      {"id": "move_back", "target": "orders", "label": "Move orders back to AWS", "risk": "high"},
+      {"id": "reverify", "target": "stack", "label": "Re-verify the stack", "risk": "low"}
+    ]
+  },
+  "applied": []
+}

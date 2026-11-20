@@ -175,8 +175,59 @@ class Approval(BaseModel):               # L1, L2
     plan_sha256: str                     # sha256 of pam.json + assessment.json as approved; execute() refuses if either changed
     scope: list[str] | None = None       # docs/16: component ids approved to run self-hosted; None = all movable
 
+# ---------- Boomerang Doctor (docs/18 §2) ----------
+DoctorActionId = Literal["restart_service", "reverify", "move_back", "start_service"]
+Severity = Literal["degraded", "down"]
+
+class Signal(BaseModel):                           # one observation of the stack (piece 1, A, produces these)
+    source: Literal["container", "logs", "health", "probe", "queue"]
+    service: str                                   # compose service: postgres | rabbitmq | seaweedfs | api | worker
+    ok: bool
+    detail: str = ""                               # "exited (1) 2 min ago", "GET /health 500", "connection refused"
+    lines: list[str] = []                          # evidence: log lines, newest last (<= 40)
+    data: dict[str, Any] = {}                      # e.g. {"state": "exited", "exit_code": 1, "restarts": 3, "depth": 120}
+
+class Action(BaseModel):                           # one fix from the allowlist (piece 1, A, runs it)
+    id: DoctorActionId
+    target: str                                    # service name, or component id for move_back
+    label: str                                     # "Restart postgres", "Move orders back to AWS"
+    risk: Literal["low", "medium", "high"]         # restart = low, reverify = low, move_back = high
+
+class Diagnosis(BaseModel):                        # piece 2 (B) produces this from signals
+    rule: str                                      # "db_down", "queue_down", ... or "unknown"
+    root_cause: str                                # one sentence, from the rule
+    service: str | None = None                     # the failing compose service
+    component_id: str | None = None                # the PAM component behind it (orders, order_events, receipts)
+    impact: list[str] = []                         # user-facing: ["Create order (POST /orders)", ...]
+    severity: Severity
+    evidence: list[Signal] = []                    # only the signals that support the rule
+    actions: list[Action] = []                     # ranked, best first
+
+class AppliedAction(BaseModel):                    # one approved fix and what came of it (Incident.applied)
+    action: Action
+    by: str                                        # "cli" | "ui"
+    at: float
+    ok: bool
+    detail: str = ""
+
+class Incident(BaseModel):                         # piece 3 (C) writes it to runs/<id>/doctor.json
+    run_id: str
+    at: float
+    diagnosis: Diagnosis
+    explanation: str = ""                          # the AI's plain words (empty if the model is unavailable)
+    severity: Severity                             # = diagnosis.severity, or raised by the AI
+    llm: str = ""                                  # config.Settings.llm_badge
+    applied: list[AppliedAction] = []
+    resolved_at: float | None = None               # set when a later check finds the stack healthy again
+
+class DoctorExplanation(BaseModel):                # LLM-facing: the AI explains, it never decides (docs/18 §5.3)
+    explanation: str                               # three short sentences: what happened, what users see, why fix 1
+    raise_severity: bool = False                   # may turn degraded into down, never the other way
+
+
 # ---------- Events & runs ----------
-Stage = Literal["scan", "assess", "approve", "delock", "generate", "verify", "fix", "data", "rollback", "report", "cost"]
+Stage = Literal["scan", "assess", "approve", "delock", "generate", "verify", "fix", "data", "rollback", "report", "cost",
+                "doctor"]   # docs/18
 
 class Event(BaseModel):
     ts: float; run_id: str; stage: Stage

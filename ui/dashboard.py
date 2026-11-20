@@ -12,6 +12,7 @@ import streamlit as st
 
 from ui import data, live, runner, theme
 from ui.components import breaks, code, costs, roundtrip, setup
+from ui.components import doctor as doctor_tab
 from ui.components import scope as scope_tab
 
 APP_DIR = "sample-app/aws"
@@ -158,8 +159,8 @@ def render() -> None:
     assessment = breaks._as_dict(assessment) if assessment else None
     rows = breaks.group_findings(assessment, breaks._load_pam(src)) if assessment else []
 
-    t1, t2, t3, t4, t5, t6 = st.tabs(["What breaks", "Placement", "Code", "Self-hosted setup",
-                                      "Data & round trip", "Costs"])
+    t1, t2, t3, t4, t5, t6, t7 = st.tabs(["What breaks", "Placement", "Code", "Self-hosted setup",
+                                          "Data & round trip", "Doctor", "Costs"])
     with t1:
         breaks.render(src)
     with t2:
@@ -174,4 +175,6 @@ def render() -> None:
     with t5:
         roundtrip.render(src)
     with t6:
+        doctor_tab.render(src, rows)
+    with t7:
         costs.render(src, rows)

@@ -32,8 +32,14 @@ ss.setdefault("mode", "Replay")
 
 # ---------- sidebar ----------
 with st.sidebar:
-    st.markdown("### 🪃 Boomerang")
-    st.caption("Leave AWS. Prove it works. Come back.")
+    st.markdown(
+        '<div style="display:flex;align-items:center;gap:10px;margin:4px 0 18px">'
+        '<div style="width:26px;height:26px;border-radius:7px;display:grid;place-items:center;'
+        'background:linear-gradient(135deg,#7170FF,#4E4BD8);font-size:14px">🪃</div>'
+        '<div><div style="font-weight:600;color:#F7F8F8;letter-spacing:-0.01em">Boomerang</div>'
+        '<div style="font-size:0.75rem;color:#8A8F98">AWS ⇄ Leaseweb</div></div></div>',
+        unsafe_allow_html=True,
+    )
 
     source_app = st.selectbox("Source app", ["sample-app/aws"], help="AWS app to migrate")
 
@@ -74,37 +80,25 @@ else:
 
 
 # ---------- header ----------
-left, right = st.columns([3, 1])
-with left:
-    st.markdown(
-        '<h1 style="margin-bottom:0">Boomerang</h1>'
-        '<div class="bm-muted">'
-        '<span class="bm-aws">AWS</span> → <span class="bm-lw">Leaseweb</span> → '
-        '<span class="bm-aws">AWS</span> · see what breaks, move it, prove it, come back'
-        "</div>",
-        unsafe_allow_html=True,
-    )
-with right:
-    st.markdown(
-        f'<div style="text-align:right;margin-top:1.2rem">{theme.badge(src.label)}</div>',
-        unsafe_allow_html=True,
-    )
+st.markdown(
+    f'<span class="bm-eyebrow"><b>InfraHack 2026</b>{src.label}</span>'
+    '<div class="bm-title">Leave AWS. Prove it works.<br>Come back.</div>'
+    '<div class="bm-sub">Boomerang shows what breaks, moves your app from '
+    '<span class="bm-aws">AWS</span> to <span class="bm-lw">Leaseweb</span> with a local AI '
+    "model, proves it with your own tests, and brings you back.</div>",
+    unsafe_allow_html=True,
+)
 
-# Pipeline strip (Terraform-style plan → approve → apply)
+# Pipeline canvas (Railway-style nodes; Terraform-style plan → approve → apply)
 status = data.stage_status(src.events)
 if ss.approved:
     status["approve"] = "done"
-steps = "".join(
-    f'<div class="bm-step {status.get(key, "")}"><b>{label}</b>'
-    f'{status.get(key, "pending")}</div>'
-    for key, label in theme.PIPELINE
-)
-st.markdown(f'<div class="bm-strip">{steps}</div>', unsafe_allow_html=True)
+st.markdown(theme.pipeline_html(status), unsafe_allow_html=True)
 
 
 # ---------- tabs ----------
 t1, t2, t3, t4, t5 = st.tabs(
-    ["🚦 What breaks", "🧩 Code", "🏗️ Leaseweb setup", "🔁 Data & round trip", "💶 Costs"]
+    ["What breaks", "Code", "Leaseweb setup", "Data & round trip", "Costs"]
 )
 with t1:
     breaks.render(src)

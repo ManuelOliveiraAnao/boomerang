@@ -71,15 +71,20 @@ def group_findings(assessment: dict, pam: dict) -> list[dict]:
 
 def _pill(light: str) -> str:
     c = LIGHT_COLORS[light]
-    return (f'<span style="background:{c}22;color:{c};border:1px solid {c}66;'
-            f'padding:1px 10px;border-radius:999px;font-size:0.78rem;white-space:nowrap">'
-            f'{LIGHT_EMOJI[light]} {LIGHT_LABEL[light]}</span>')
+    return (f'<span style="display:inline-flex;align-items:center;gap:6px;background:{c}14;'
+            f'color:{c};border:1px solid {c}40;padding:2px 10px;border-radius:999px;'
+            f'font-size:0.75rem;font-weight:500;white-space:nowrap">'
+            f'<span style="width:6px;height:6px;border-radius:50%;background:{c};'
+            f'box-shadow:0 0 6px {c}"></span>{LIGHT_LABEL[light]}</span>')
 
 
 def _chip(text: str, light: str) -> str:
     c = LIGHT_COLORS[light]
-    return (f'<span style="border:1px solid {c}55;color:#C9D1D9;padding:0 8px;'
-            f'border-radius:6px;font-size:0.75rem;margin-right:4px">{html.escape(text)}</span>')
+    return (f'<span style="display:inline-flex;align-items:center;gap:5px;'
+            f'border:1px solid rgba(255,255,255,0.08);background:#141516;color:#D0D6E0;'
+            f'padding:1px 8px;border-radius:6px;font-size:0.74rem;margin:0 4px 4px 0">'
+            f'<span style="width:5px;height:5px;border-radius:50%;background:{c}"></span>'
+            f'{html.escape(text)}</span>')
 
 
 def _component_card(row: dict) -> None:
@@ -124,9 +129,9 @@ def render(src: Source) -> None:
 
     # ---- counters ----
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🟢 Config only", count["green"])
-    c2.metric("🟠 Via adapter", count["amber"])
-    c3.metric("🔴 Needs a human", count["red"])
+    c1.metric(":green[●] Config only", count["green"])
+    c2.metric(":orange[●] Via adapter", count["amber"])
+    c3.metric(":red[●] Needs a human", count["red"])
     lock = src.json("lockin")
     if lock and lock.get("before"):
         removed = round(100 * (1 - lock["after"] / lock["before"]))
@@ -147,7 +152,7 @@ def render(src: Source) -> None:
     if reds:
         st.markdown("#### Will NOT be migrated")
         with st.container(border=True):
-            st.error("🔴 Needs a human. Boomerang flags these and does not fake them; "
+            st.error("Needs a human. Boomerang flags these and does not fake them; "
                      "they stay on AWS until someone handles them.")
             for row in reds:
                 _component_card(row)
@@ -164,7 +169,7 @@ def render(src: Source) -> None:
     else:
         st.info(f"Nothing is written until you approve. {len(migrated)} components will move to "
                 f"Leaseweb; {len(reds)} are flagged for a human and AWS stays untouched.")
-        if st.button("✅ Approve plan", type="primary"):
+        if st.button("Approve plan", type="primary"):
             ss.approved = True
             ss.approved_at = time.strftime("%H:%M:%S")
             st.rerun()

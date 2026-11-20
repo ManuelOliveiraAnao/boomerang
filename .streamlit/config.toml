@@ -6,14 +6,21 @@ gatherUsageStats = false
 headless = true
 runOnSave = true
 
-[theme]
-base = "dark"
-# Leaseweb-style red, used sparingly (primary buttons, focus).
-primaryColor = "#E3001B"
-backgroundColor = "#0B0D10"
-secondaryBackgroundColor = "#15181D"
-textColor = "#E6E8EB"
-font = "sans serif"
-
 [client]
 toolbarMode = "minimal"
+
+# Look: Linear-style neutral dark base + Railway-style canvas (see ui/theme.py).
+[theme]
+base = "dark"
+primaryColor = "#7170FF"
+backgroundColor = "#08090A"
+secondaryBackgroundColor = "#141516"
+textColor = "#F7F8F8"
+borderColor = "#23252A"
+baseRadius = "0.75rem"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+
+[theme.sidebar]
+backgroundColor = "#0F1011"
+secondaryBackgroundColor = "#17181A"

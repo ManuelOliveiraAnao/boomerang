@@ -139,28 +139,58 @@ def render() -> None:
         for art, t, d in problems) + "</div>")
 
     # ---------------- how it works ----------------
-    _section(
-        "How it works",
-        "From AWS app to verified Leaseweb setup, in nine steps.",
-        "Rules and templates do everything that must be exact. The AI only does what needs "
-        "reading unfamiliar code, and every AI output is checked before it is used.",
-    )
+    # A scroll-driven timeline: the heading stays pinned on the left while the
+    # boomerang travels down the rail on the right, lighting each step it passes.
+    # (title, description, who does it, uses AI, what it produces)
     steps = [
-        ("Scan", "Finds every AWS dependency in code, Terraform, Dockerfile and env, with file and line.", "AI + static analysis", True),
-        ("Traffic lights", "Labels each service and feature green, amber or red. Rules decide; AI only explains.", "Rules", False),
-        ("Approve", "A human reviews the plan. Nothing is written before approval.", "Human", False),
-        ("De-lock", "Rewrites each function that calls AWS onto small, pre-tested adapters. S3 is just a config change.", "AI per function", True),
-        ("Leaseweb files", "Generates docker-compose, cloud-init, deploy script, backups, scoped credentials and DEPLOY.md.", "Templates", False),
-        ("Verify live", "Files valid → stack boots → the app's original tests pass → health check.", "Plain code", False),
-        ("Move data", "Copies items, objects and pending messages; compares counts and checksums.", "Plain code", False),
-        ("Round trip", "Back to AWS with the original code and data copied back, tests again, and a list of what got lost.", "Plain code", False),
-        ("Costs", "AWS vs Leaseweb with published prices, your usage and the ops hours to run it yourself.", "Plain code", False),
+        ("Scan", "Finds every AWS dependency in code, Terraform, Dockerfile and env, with file and line.",
+         "Static analysis + AI", True, "pam.json"),
+        ("Traffic lights", "Labels each service and feature green, amber or red. Rules decide; the AI only explains.",
+         "Rules", False, "assessment.json"),
+        ("Approve", "A human reviews the plan. Nothing is written before approval.",
+         "Human", False, "approval.json"),
+        ("De-lock", "Rewrites each function that calls AWS onto small, pre-tested adapters. S3 is just a config change.",
+         "AI, one function at a time", True, "delock.json · diffs/"),
+        ("Leaseweb files", "Generates docker-compose, cloud-init, a deploy script, backups, scoped credentials and DEPLOY.md.",
+         "Templates", False, "leaseweb/"),
+        ("Verify", "Files valid, stack boots, the app's original tests pass, health check answers.",
+         "Plain code", False, "tests passed"),
+        ("Move data", "Copies items, objects and pending messages, then compares counts and checksums.",
+         "Plain code", False, "counts + checksums"),
+        ("Round trip", "Back to AWS with the original code and the data copied back, tests again, and a list of what got lost.",
+         "Plain code", False, "what got lost"),
+        ("Costs", "AWS against Leaseweb with published prices, your usage and the ops hours to run it yourself.",
+         "Plain code", False, "cost estimate"),
     ]
-    _html('<div class="lp-steps">' + "".join(
-        f'<div class="lp-step"><div class="num"></div><div><b>{t}</b><p>{d}</p>'
-        f'<span class="lp-tag {"ai" if ai else ""}">{tag}</span></div></div>'
-        for t, d, tag, ai in steps
-    ) + "</div>")
+    phases = [("Plan", "01–03"), ("Build", "04–05"), ("Prove", "06–09")]
+    side = (
+        '<div class="tl-side">'
+        '<div class="lp-kicker">How it works</div>'
+        '<div class="lp-h2">From AWS app to verified Leaseweb setup, in nine steps.</div>'
+        '<div class="lp-lead">Rules and templates do everything that must be exact. The AI only does what '
+        'needs reading unfamiliar code, and every AI output is checked before it is used.</div>'
+        '<div class="tl-read"><span class="tl-cur">01</span><span class="tl-of">/ 09</span></div>'
+        f'<div class="tl-name">{steps[0][0]}</div>'
+        '<div class="tl-bar"><i></i></div>'
+        '<div class="tl-phases">' + "".join(
+            f'<div class="tl-phase{" on" if i == 0 else ""}"><b>{p}</b><span>{r}</span></div>'
+            for i, (p, r) in enumerate(phases)) + '</div>'
+        '</div>'
+    )
+    items = "".join(
+        f'<div class="tl-step"><span class="tl-node"></span>'
+        f'<div class="tl-meta"><span class="tl-n">{i:02d}</span>'
+        f'<span class="tl-kind{" ai" if ai else ""}">{kind}</span></div>'
+        f'<div class="tl-title">{t}</div><p>{d}</p>'
+        f'<div class="tl-out"><span>Output</span><code>{out}</code></div></div>'
+        for i, (t, d, kind, ai, out) in enumerate(steps, 1)
+    )
+    _html(
+        '<div class="lp-section lp-tl">' + side +
+        '<div class="tl-list"><div class="tl-rail"><i class="tl-fill"></i></div>'
+        f'<div class="tl-mark"><span class="tl-boom">{logo_svg(20)}</span></div>'
+        + items + '</div></div>'
+    )
 
     # ---------------- traffic lights ----------------
     _section(

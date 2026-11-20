@@ -217,15 +217,6 @@ _LANDING_CSS = f"""
   .lp-stat b {{ display: block; color: {TEXT}; font-size: 1.35rem; font-weight: 560; letter-spacing: -0.02em; }}
   .lp-stat span {{ color: {MUTED}; font-size: 0.82rem; }}
 
-  .lp-steps {{ display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); counter-reset: s; }}
-  .lp-step {{ display: flex; gap: 14px; background: {BG_1}; border: 1px solid {BORDER}; border-radius: 12px; padding: 16px; }}
-  .lp-step .num {{ counter-increment: s; flex: 0 0 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
-    font-size: 0.75rem; color: {TEXT_2}; border: 1px solid {BORDER_STRONG}; background: {BG_2}; }}
-  .lp-step .num::before {{ content: counter(s); }}
-  .lp-step b {{ color: {TEXT}; font-weight: 500; font-size: 0.95rem; }}
-  .lp-step p {{ color: {MUTED}; font-size: 0.86rem; margin: 3px 0 6px; line-height: 1.5; }}
-  .lp-tag {{ display: inline-block; font-size: 0.7rem; padding: 1px 8px; border-radius: 999px; border: 1px solid {BORDER_STRONG}; color: {MUTED}; }}
-  .lp-tag.ai {{ color: #A5A4FF; border-color: {ACCENT}55; background: {ACCENT}14; }}
 
   .lp-light {{ border-top: 2px solid var(--c); }}
   .lp-light .dot {{ width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); display: inline-block; }}
@@ -246,6 +237,69 @@ _LANDING_CSS = f"""
 
   .lp-chips {{ display: flex; flex-wrap: wrap; gap: 8px; }}
   .lp-chip {{ border: 1px solid {BORDER}; background: {BG_1}; color: {TEXT_2}; border-radius: 999px; padding: 4px 12px; font-size: 0.82rem; }}
+
+  /* How it works: pinned heading on the left, a rail with a travelling boomerang on the right. */
+  .lp-tl {{ display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 72px; align-items: start; }}
+  .tl-side {{ position: sticky; top: 88px; padding-top: 6px; }}
+  .tl-side .lp-lead {{ margin-bottom: 40px; }}
+  .tl-read {{ display: flex; align-items: baseline; gap: 10px; font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums; }}
+  .tl-cur {{ font-size: 4.25rem; line-height: 1; letter-spacing: -0.04em; color: {TEXT}; }}
+  .tl-of {{ font-size: 0.95rem; color: {FAINT}; }}
+  .tl-name {{ color: {TEXT_2}; font-size: 1rem; margin: 10px 0 18px; min-height: 1.5em; }}
+  .tl-name.flip, .tl-cur.flip {{ animation: tlflip .42s cubic-bezier(.215,.61,.355,1); }}
+  @keyframes tlflip {{ from {{ opacity: 0; transform: translateY(6px); }} }}
+  .tl-bar {{ height: 2px; background: {BORDER}; border-radius: 2px; overflow: hidden; margin-bottom: 22px; }}
+  .tl-bar i {{ display: block; height: 100%; width: 0; background: {ACCENT}; }}
+  .tl-phases {{ border-top: 1px solid {BORDER}; }}
+  .tl-phase {{ display: flex; justify-content: space-between; align-items: center; padding: 11px 0;
+    border-bottom: 1px solid {BORDER}; transition: color .3s; }}
+  .tl-phase b {{ font-weight: 500; font-size: 0.9rem; color: {FAINT}; display: flex; align-items: center; gap: 10px; transition: color .3s; }}
+  .tl-phase b::before {{ content: ""; width: 6px; height: 6px; border-radius: 1px; background: {BORDER_STRONG}; transition: background .3s; }}
+  .tl-phase span {{ font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.75rem; color: {FAINT}; }}
+  .tl-phase.on b {{ color: {TEXT}; }}
+  .tl-phase.on b::before {{ background: {ACCENT}; }}
+
+  .tl-list {{ position: relative; padding: 6px 0 0 64px; }}
+  .tl-rail {{ position: absolute; left: 19.5px; top: 13px; bottom: 0; width: 1px; background: {BORDER_STRONG}; }}
+  .tl-fill {{ position: absolute; left: -0.5px; top: 0; width: 2px; height: 0;
+    background: linear-gradient(180deg, {ACCENT}00, {ACCENT} 40%); display: none; }}
+  .tl-mark {{ position: absolute; left: -2.5px; top: 0; width: 44px; height: 44px; display: none; place-items: center;
+    border-radius: 50%; background: {BG}; border: 1px solid {BORDER_STRONG}; box-shadow: 0 0 0 6px {BG}, 0 0 24px {ACCENT}40;
+    z-index: 2; will-change: transform; }}
+  .tl-boom {{ display: block; will-change: transform; }}
+  .tl-step {{ position: relative; min-height: 34vh; padding-bottom: 48px; }}
+  .tl-step:last-child {{ min-height: 0; padding-bottom: 8px; }}
+  .tl-node {{ position: absolute; left: -49px; top: 8px; width: 9px; height: 9px; border-radius: 50%;
+    background: {BG}; border: 1px solid {FAINT}; transition: background .35s, border-color .35s, box-shadow .35s; }}
+  .tl-meta {{ display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.74rem; margin-bottom: 10px; }}
+  .tl-n {{ color: {FAINT}; }}
+  .tl-kind {{ color: {MUTED}; letter-spacing: 0.02em; }}
+  .tl-kind.ai {{ color: #A5A4FF; }}
+  .tl-title {{ font-size: 1.45rem; font-weight: 560; letter-spacing: -0.02em; color: {TEXT}; line-height: 1.2; margin-bottom: 8px; }}
+  .tl-step p {{ color: {MUTED}; font-size: 0.98rem; line-height: 1.6; max-width: 470px; margin: 0 0 16px; }}
+  .tl-out {{ display: inline-flex; align-items: center; gap: 10px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.75rem; }}
+  .tl-out span {{ color: {FAINT}; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.68rem; }}
+  .tl-out code {{ color: {TEXT_2}; background: {BG_1}; border: 1px solid {BORDER}; border-radius: 6px; padding: 3px 8px; font-size: 0.75rem; }}
+
+  /* Scroll states, only when the motion script runs. */
+  html.bm-motion .tl-fill {{ display: block; }}
+  html.bm-motion .tl-mark {{ display: grid; }}
+  html.bm-motion .tl-step {{ opacity: 0; transform: translate3d(0, 28px, 0);
+    transition: opacity .7s cubic-bezier(.215,.61,.355,1), transform .9s cubic-bezier(.215,.61,.355,1); }}
+  html.bm-motion .tl-step.seen {{ opacity: .3; transform: none; }}
+  html.bm-motion .tl-step.on {{ opacity: 1; }}
+  html.bm-motion .tl-step.on .tl-node {{ background: {ACCENT}; border-color: {ACCENT}; }}
+  html.bm-motion .tl-step.on .tl-n {{ color: #A5A4FF; }}
+  html.bm-motion .tl-step.is-cur .tl-node {{ box-shadow: 0 0 0 5px {ACCENT}26; }}
+
+  @media (max-width: 900px) {{
+    .lp-tl {{ grid-template-columns: 1fr; }}
+    .tl-side {{ position: static; margin-bottom: 28px; }}
+    .tl-read, .tl-name, .tl-bar, .tl-phases {{ display: none; }}
+    .tl-step {{ min-height: 0; }}
+  }}
 
   /* Problem: four open columns with thin dividers, isometric line art above each title. */
   .lp-problem {{ display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 18px; }}

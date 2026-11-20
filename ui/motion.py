@@ -22,7 +22,6 @@ _GROUPS = [
     (".lp-stats", 80),
     (".lp-grid", 80),
     (".lp-problem", 110),
-    (".lp-steps", 60),
     (".lp-trip", 90),
     (".lp-list", 50),
     (".lp-chips", 25),
@@ -210,7 +209,66 @@ _JS = """
         mag.set(b, st);
       });
     }
+    document.querySelectorAll(".lp-tl").forEach(timeline);
     requestAnimationFrame(frame);
+  }
+
+  // ---- "How it works" timeline: the boomerang travels down the rail and
+  // lights every step it passes; the pinned side panel follows along. ----
+  const tlState = new WeakMap();
+  const PHASE_OF = [0, 0, 0, 1, 1, 2, 2, 2, 2];
+  const NODE = 12.5;                       // node centre, px below a step's top
+  function flip(el, text) {
+    if (!el || el.textContent === text) return;
+    el.textContent = text;
+    el.classList.remove("flip"); void el.offsetWidth; el.classList.add("flip");
+  }
+  function timeline(tl) {
+    const list = tl.querySelector(".tl-list");
+    const steps = list ? [...list.querySelectorAll(".tl-step")] : [];
+    if (!steps.length) return;
+    const st = tlState.get(tl) || { p: 0, cur: -2, sc: null };
+    if (!st.sc || !st.sc.isConnected) st.sc = findScroller(tl);
+    const vr = st.sc === document.scrollingElement
+      ? { top: 0, height: innerHeight } : st.sc.getBoundingClientRect();
+    const lr = list.getBoundingClientRect();
+    const ys = steps.map((s) => s.getBoundingClientRect().top - lr.top + NODE);
+    const y0 = ys[0], span = Math.max(1, ys[ys.length - 1] - y0);
+
+    const rail = list.querySelector(".tl-rail");
+    rail.style.top = y0 + "px"; rail.style.height = span + "px"; rail.style.bottom = "auto";
+
+    // The reading line sits a little above the middle of the viewport.
+    const line = vr.top + vr.height * 0.52;
+    const target = Math.max(0, Math.min(span, line - lr.top - y0));
+    st.p += (target - st.p) * 0.16;
+    if (Math.abs(target - st.p) < 0.1) st.p = target;
+
+    list.querySelector(".tl-fill").style.height = st.p.toFixed(1) + "px";
+    list.querySelector(".tl-mark").style.transform = `translate3d(0, ${(y0 + st.p - 22).toFixed(1)}px, 0)`;
+    // A boomerang spins as it flies: about one turn per 320px of travel.
+    list.querySelector(".tl-boom").style.transform = `rotate(${(st.p * 1.125).toFixed(1)}deg)`;
+
+    let cur = -1;
+    const seenLine = vr.top + vr.height * 0.9;
+    steps.forEach((s, i) => {
+      const on = st.p >= ys[i] - y0 - 6;
+      s.classList.toggle("on", on);
+      if (on) cur = i;
+      if (lr.top + ys[i] < seenLine) s.classList.add("seen");
+    });
+    steps.forEach((s, i) => s.classList.toggle("is-cur", i === cur));
+    const bar = tl.querySelector(".tl-bar i");
+    if (bar) bar.style.width = (100 * st.p / span).toFixed(2) + "%";
+
+    if (cur !== st.cur) {
+      st.cur = cur;
+      const i = Math.max(0, cur);
+      flip(tl.querySelector(".tl-cur"), String(i + 1).padStart(2, "0"));
+      flip(tl.querySelector(".tl-name"), steps[i].querySelector(".tl-title").textContent);
+      tl.querySelectorAll(".tl-phase").forEach((ph, k) => ph.classList.toggle("on", k === PHASE_OF[i]));
+    }
+    tlState.set(tl, st);
   }
   requestAnimationFrame(frame);
 })();

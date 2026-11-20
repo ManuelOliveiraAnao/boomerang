@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ui import motion
+from ui import iso_art, motion
 from ui.theme import LIGHT_COLORS, logo_svg, wordmark_svg
 
 
@@ -124,18 +124,19 @@ def render() -> None:
         "Companies stay on AWS not because of price, but because their code is wired into "
         "proprietary services and nobody can say what will break, what it will cost, or how to go back.",
     )
-    _html("""
-      <div class="lp-grid">
-        <div class="lp-card"><div class="lp-icon">🔗</div><h3>Code lock-in</h3>
-          <p>DynamoDB, SQS, S3, Lambda and IAM calls are spread through the code and Terraform. Leaving looks like a rewrite.</p></div>
-        <div class="lp-card"><div class="lp-icon">❓</div><h3>Unknown losses</h3>
-          <p>Some features have no direct equivalent. Teams find out in production, not before.</p></div>
-        <div class="lp-card"><div class="lp-icon">🚪</div><h3>No way back</h3>
-          <p>Once data is written on the new side, going back means a second migration nobody planned.</p></div>
-        <div class="lp-card"><div class="lp-icon">💶</div><h3>Fuzzy costs</h3>
-          <p>"It'll be cheaper" is a guess unless you price both sides with real numbers and real ops time.</p></div>
-      </div>
-    """)
+    problems = [
+        (iso_art.lock_in(), "Code lock-in",
+         "DynamoDB, SQS, S3, Lambda and IAM calls are spread through the code and Terraform. Leaving looks like a rewrite."),
+        (iso_art.unknown(), "Unknown losses",
+         "Some features have no direct equivalent. Teams find out in production, not before."),
+        (iso_art.no_way_back(), "No way back",
+         "Once data is written on the new side, going back means a second migration nobody planned."),
+        (iso_art.fuzzy_costs(), "Fuzzy costs",
+         '"It\'ll be cheaper" is a guess unless you price both sides with real numbers and real ops time.'),
+    ]
+    _html('<div class="lp-problem">' + "".join(
+        f'<div class="lp-prob"><div class="art">{art}</div><h3>{t}</h3><p>{d}</p></div>'
+        for art, t, d in problems) + "</div>")
 
     # ---------------- how it works ----------------
     _section(

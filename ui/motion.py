@@ -21,6 +21,7 @@ import streamlit as st
 _GROUPS = [
     (".lp-stats", 80),
     (".lp-grid", 80),
+    (".lp-problem", 110),
     (".lp-steps", 60),
     (".lp-trip", 90),
     (".lp-list", 50),

@@ -193,7 +193,8 @@ _LANDING_CSS = f"""
   .lp-hero .bm-sub {{ margin: 0 auto; font-size: 1.12rem; max-width: 680px; line-height: 1.55; }}
 
   .lp-section {{ padding: 64px 0 8px; }}
-  .lp-kicker {{ color: #A5A4FF; font-size: 0.8rem; font-weight: 500; letter-spacing: 0.02em; margin-bottom: 8px; }}
+  .lp-kicker {{ color: {MUTED}; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.78rem;
+    font-weight: 400; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }}
   .lp-h2 {{ font-size: clamp(1.7rem, 3vw, 2.4rem); font-weight: 560; letter-spacing: -0.03em; color: {TEXT}; line-height: 1.12; margin: 0 0 10px; }}
   .lp-lead {{ color: {MUTED}; font-size: 1.02rem; max-width: 720px; line-height: 1.6; margin-bottom: 26px; }}
 
@@ -245,6 +246,24 @@ _LANDING_CSS = f"""
 
   .lp-chips {{ display: flex; flex-wrap: wrap; gap: 8px; }}
   .lp-chip {{ border: 1px solid {BORDER}; background: {BG_1}; color: {TEXT_2}; border-radius: 999px; padding: 4px 12px; font-size: 0.82rem; }}
+
+  /* Problem: four open columns with thin dividers, isometric line art above each title. */
+  .lp-problem {{ display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 18px; }}
+  .lp-prob {{ padding: 4px 28px 8px; border-left: 1px solid {BORDER}; }}
+  .lp-prob:first-child {{ padding-left: 0; border-left: 0; }}
+  .lp-prob .art {{ height: 190px; display: flex; align-items: center; justify-content: center; margin-bottom: 26px; }}
+  .lp-prob .art svg {{ height: 150px; width: auto; max-width: 100%; overflow: visible; }}
+  .lp-prob h3 {{ font-size: 1.05rem !important; font-weight: 560 !important; color: {TEXT} !important; margin: 0 0 10px !important; padding: 0 !important; }}
+  .lp-prob p {{ color: {MUTED}; font-size: 0.93rem; line-height: 1.6; margin: 0; max-width: 300px; }}
+  :is(.lp-prob, .lp-card) h3 a[aria-label="Link to heading"] {{ display: none; }}
+  @media (max-width: 900px) {{
+    .lp-problem {{ grid-template-columns: repeat(2, 1fr); row-gap: 36px; }}
+    .lp-prob:nth-child(3) {{ padding-left: 0; border-left: 0; }}
+  }}
+  @media (max-width: 560px) {{
+    .lp-problem {{ grid-template-columns: 1fr; }}
+    .lp-prob {{ padding-left: 0; border-left: 0; }}
+  }}
 
   .lp-cta {{ text-align: center; padding: 56px 20px; margin-top: 64px; border-radius: 18px; border: 1px solid {BORDER};
     background-color: {BG_1}; background-image: radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px); background-size: 18px 18px; }}

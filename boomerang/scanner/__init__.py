@@ -1,17 +1,12 @@
-"""Scanner: static hints + AI pass → PAM. Owner B, tasks B2/B3.
+"""Application scanners."""
 
-Spec: docs/03 §3.3. Stub created by C1: B replaces the body.
-"""
+from .static import scan_static
 
-from __future__ import annotations
+def scan(app_dir, emit=None):
+    """Run the static B2 pass; emit is reserved for C2 pipeline integration."""
+    pam = scan_static(app_dir)
+    if emit is not None and hasattr(emit, "emit"):
+        emit.emit("scan", "Static scan completed", "success", components=len(pam.components))
+    return pam
 
-from pathlib import Path
-
-from boomerang._stub import NotBuilt
-from boomerang.events import Emitter
-from boomerang.models import AppModel
-
-
-def scan(app_dir: Path, emit: Emitter) -> AppModel:
-    """Binding (docs/03 §3.3). `CodeRef.file` paths: POSIX, relative to `app_dir`."""
-    raise NotBuilt("scanner.scan", owner="B", doc="docs/03 §3.3")
+__all__ = ["scan", "scan_static"]

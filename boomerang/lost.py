@@ -1,14 +1,59 @@
-"""What got lost: preserved / changed / lost. Owner B, task B7.
-
-Spec: docs/03 §3.12. Stub created by C1: B replaces the body.
-"""
-
 from __future__ import annotations
 
-from boomerang._stub import NotBuilt
-from boomerang.models import AppModel, Assessment, DataMove, LostItem
+from typing import Any
+
+from boomerang.models import LostItem
 
 
-def build(pam: AppModel, assessment: Assessment, data_moves: list[DataMove]) -> list[LostItem]:
-    """Binding (docs/03 §3.12). ``assessment`` includes the de-lock findings (assessment.final.json)."""
-    raise NotBuilt("lost.build", owner="B", doc="docs/03 §3.12")
+def _model_to_dict(value: Any) -> dict:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    return value
+
+
+def build(pam: Any, assessment: Any, data_moves: list[Any] | Any = None) -> list[LostItem]:
+    """Build a preserved/changed/lost report from findings and data moves."""
+    pam_dict = _model_to_dict(pam)
+    assessment_dict = _model_to_dict(assessment)
+    result: list[dict] = []
+
+    findings = assessment_dict.get("findings", [])
+    for finding in findings:
+        result.append(
+            {
+                "component_id": finding["component_id"],
+                "feature": finding["feature"],
+                "status": "lost" if finding["light"] == "red" else "changed" if finding["light"] == "amber" else "preserved",
+                "detail": finding["what_changes"],
+            }
+        )
+
+    component_ids = {component["id"] for component in pam_dict.get("components", [])}
+    covered_ids = {item["component_id"] for item in result}
+    for component_id in sorted(component_ids - covered_ids):
+        result.append(
+            {
+                "component_id": component_id,
+                "feature": "component",
+                "status": "preserved",
+                "detail": "No migration-specific finding was recorded.",
+            }
+        )
+
+    if data_moves is not None:
+        moves = _model_to_dict(data_moves)
+        if isinstance(moves, dict):
+            moves = [moves]
+        for move in moves:
+            move_dict = _model_to_dict(move)
+            for count in move_dict.get("counts", []):
+                if count.get("notes"):
+                    result.append(
+                        {
+                            "component_id": count["component_id"],
+                            "feature": "data",
+                            "status": "changed",
+                            "detail": "; ".join(count["notes"]),
+                        }
+                    )
+    return [LostItem.model_validate(item) for item in result]

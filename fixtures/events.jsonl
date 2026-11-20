@@ -1,0 +1,5 @@
+{"ts":1.0,"run_id":"fixture","stage":"scan","level":"success","message":"Static scan completed","data":{"components":6}}
+{"ts":2.0,"run_id":"fixture","stage":"assess","level":"success","message":"Traffic-light assessment completed","data":{"findings":5}}
+{"ts":3.0,"run_id":"fixture","stage":"generate","level":"success","message":"Leaseweb files generated","data":{"files":13}}
+{"ts":4.0,"run_id":"fixture","stage":"verify","level":"success","message":"Verification passed","data":{"attempt":1}}
+{"ts":5.0,"run_id":"fixture","stage":"data","level":"success","message":"Data move passed","data":{"direction":"aws->leaseweb"}}

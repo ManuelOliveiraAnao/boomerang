@@ -1,11 +1,23 @@
-"""Lock-in score (docs/03 §3.4). Owner B, task B4. Stub created by C1: B replaces the body."""
-
 from __future__ import annotations
 
-from boomerang._stub import NotBuilt
-from boomerang.models import AppModel
+from typing import Any
 
 
-def score(pam: AppModel) -> int:
-    """Weighted by usage count; DynamoDB 90, SQS 70, S3 35, Lambda 95, IAM 80; Leaseweb providers 5–10."""
-    raise NotBuilt("lockin.score", owner="B", doc="docs/03 §3.4")
+WEIGHTS = {
+    "aws.dynamodb": 90,
+    "aws.sqs": 70,
+    "aws.s3": 35,
+    "aws.lambda": 95,
+    "aws.iam": 80,
+}
+
+
+def score(pam: Any) -> int:
+    """Calculate a weighted AWS lock-in score from PAM component usage."""
+    pam_dict = pam.model_dump() if hasattr(pam, "model_dump") else pam
+    total = 0
+    for component in pam_dict.get("components", []):
+        provider = component.get("provider", "")
+        usage_count = max(1, len(component.get("usages", [])))
+        total += WEIGHTS.get(provider, 10) * usage_count
+    return total

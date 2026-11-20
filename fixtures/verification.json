@@ -1,0 +1,19 @@
+{
+  "checks": [
+    {"name": "compose config", "ok": true, "detail": "docker compose config -q", "duration_s": 0.4},
+    {"name": "boot", "ok": true, "detail": "all services healthy", "duration_s": 18.2},
+    {"name": "schema", "ok": true, "detail": "ShopLite schema applied", "duration_s": 1.1},
+    {"name": "health", "ok": true, "detail": "GET /health returned 200", "duration_s": 0.2}
+  ],
+  "tests": {
+    "attempt": 1,
+    "platform": "leaseweb",
+    "passed": 7,
+    "failed": 0,
+    "errors": 0,
+    "total": 7,
+    "duration_s": 4.5,
+    "failures": [],
+    "output_tail": "7 passed"
+  }
+}

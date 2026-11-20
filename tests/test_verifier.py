@@ -11,6 +11,17 @@ from boomerang import verifier
 ROOT = Path(__file__).resolve().parent.parent
 MIN = ROOT / "tests" / "fixtures" / "leaseweb-min"
 
+_REAL_WHICH = shutil.which
+
+
+def _fake_which(name: str) -> str | None:
+    """Pretend every tool (docker, cloud-init, ...) is installed, except bash: FakeDocker
+    really runs `bash -n deploy.sh`, so bash needs its real path. It lives in /bin on
+    macOS and /usr/bin on Linux and Git Bash, so a fixed /usr/bin/bash fails on macOS."""
+    if name == "bash":
+        return _REAL_WHICH("bash")
+    return f"/usr/bin/{name}"
+
 
 # ---------------------------------------------------------------- run_pytest / junit
 def _app(tmp_path, test_body: str) -> Path:
@@ -123,7 +134,7 @@ def health_server():
 
 
 def test_verify_all_green_with_fake_docker(monkeypatch, health_server):
-    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(verifier.shutil, "which", _fake_which)
     v = verifier.verify(MIN, run=FakeDocker(), health_url=health_server)
     assert [c.name for c in v.checks] == ["config", "boot", "schema", "tests", "health"]
     assert v.ok, [c.detail for c in v.checks]
@@ -131,7 +142,7 @@ def test_verify_all_green_with_fake_docker(monkeypatch, health_server):
 
 
 def test_verify_stops_when_boot_fails(monkeypatch):
-    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(verifier.shutil, "which", _fake_which)
     v = verifier.verify(MIN, run=FakeDocker(fail_up=True))
     assert [c.name for c in v.checks] == ["config", "boot"]
     assert not v.ok and "dependency failed" in v.checks[1].detail
@@ -149,7 +160,7 @@ def test_health_check_fails_cleanly():
 
 
 def test_service_and_reset_issue_the_right_compose_commands(monkeypatch):
-    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(verifier.shutil, "which", _fake_which)
     fake = FakeDocker()
     verifier.stop_service(MIN, "worker", run=fake)
     assert fake.calls[-1][-2:] == ["stop", "worker"]
@@ -168,7 +179,7 @@ def test_compose_gets_secrets_env_file(tmp_path):
 
 
 def test_verify_stops_worker_during_tests_and_restarts_it(monkeypatch, health_server):
-    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(verifier.shutil, "which", _fake_which)
     fake = FakeDocker()
     verifier.verify(MIN, run=fake, health_url=health_server)
     tail = [c[-2:] for c in fake.calls if c[0] == "docker"][-2:]
@@ -266,7 +277,7 @@ def test_config_check_catches_bad_json(tmp_path):
 
 
 def test_config_check_reports_compose_errors(tmp_path, monkeypatch):
-    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(verifier.shutil, "which", _fake_which)
 
     def run(cmd, **kw):
         if Path(cmd[0]).stem.lower() == "bash":
@@ -288,7 +299,7 @@ def test_read_env_file_handles_quotes_comments_and_blank_lines(tmp_path):
 
 def test_verify_emits_one_event_per_check(monkeypatch, health_server):
     from boomerang.events import Emitter
-    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(verifier.shutil, "which", _fake_which)
     events = []
     verifier.verify(MIN, run=FakeDocker(), health_url=health_server, emit=Emitter("t", [events.append]))
     assert [e.data["check"]["name"] for e in events] == ["config", "boot", "schema", "tests", "health"]
@@ -298,7 +309,7 @@ def test_verify_emits_one_event_per_check(monkeypatch, health_server):
 def test_verify_reports_failing_app_tests(tmp_path, monkeypatch, health_server):
     shutil.copytree(MIN, tmp_path / "lw")
     (tmp_path / "lw/app/tests/test_min.py").write_text("def test_broken():\n    assert False\n", encoding="utf-8")
-    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(verifier.shutil, "which", _fake_which)
     v = verifier.verify(tmp_path / "lw", run=FakeDocker(), health_url=health_server)
     tests = next(c for c in v.checks if c.name == "tests")
     assert not tests.ok and tests.detail == "0/1 passed" and not v.ok

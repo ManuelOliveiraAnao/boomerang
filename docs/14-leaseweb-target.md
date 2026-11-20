@@ -1,4 +1,6 @@
-# 14 · Leaseweb target files (owner: B)
+# 14 · Self-hosted target files, with Leaseweb as the example (owner: B)
+
+> **Where can it migrate to? Anywhere you can run Docker.** The output is a standard self-hosted stack (Docker Compose with Postgres, RabbitMQ and S3-compatible storage) plus a deploy script that works with any server reachable over SSH: a company's own servers, an on-premises data center, or a rented server. **Leaseweb is our example target** (European provider, used for the deploy guide and the price table). In code, the self-hosted platform is still called `leaseweb` (`Platform = "leaseweb"`, `runs/<id>/leaseweb/`); it's an internal name, not a restriction.
 
 What `generators/leaseweb.py` writes to `runs/<id>/leaseweb/`. These are real, ready-to-use files for a Leaseweb server (Public Cloud instance, VPS or dedicated server running Ubuntu 24.04), not a plan.
 

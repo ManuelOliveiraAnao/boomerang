@@ -22,20 +22,6 @@ STUBS = [
     ("boomerang.lost", "build", (None, None, []), {}, "B"),
     ("sovereign_sdk.kv", "resource", (), {}, "B"),
     ("sovereign_sdk.kv", "ddl", (None,), {}, "B"),
-    ("boomerang.lab", "up", (), {}, "A"),
-    ("boomerang.lab", "status", (), {}, "A"),
-    ("boomerang.lab", "reset", (), {}, "A"),
-    ("boomerang.verifier", "verify", (P, 1, None), {}, "A"),
-    ("boomerang.verifier", "run_tests", (P, {}, "aws", 0, None), {}, "A"),
-    ("boomerang.verifier", "aws_env", (), {}, "A"),
-    ("boomerang.verifier", "leaseweb_env", (P,), {}, "A"),
-    ("boomerang.verifier", "reset_data", (P,), {}, "A"),
-    ("boomerang.verifier", "stop_service", (P, "worker"), {}, "A"),
-    ("boomerang.verifier", "start_service", (P, "worker"), {}, "A"),
-    ("boomerang.provisioner_aws", "provision", (None,), {}, "A"),
-    ("boomerang.provisioner_aws", "seed", (None, 25), {}, "A"),
-    ("boomerang.datamover", "move", (None, "aws->leaseweb", {}, {}, None), {}, "A"),
-    ("sovereign_sdk.queue", "client", (), {}, "A"),
     ("boomerang.cost", "estimate", ({}, {}, {}), {}, "D"),
 ]
 
@@ -55,12 +41,9 @@ def test_stub_raises_not_built_with_owner(module, name, args, kwargs, owner):
 
 def test_adapter_classes_are_stubbed_too():
     from sovereign_sdk.kv import Table
-    from sovereign_sdk.queue import Queue
 
     with pytest.raises(NotBuilt):
         Table().get_item(Key={"order_id": "1"})
-    with pytest.raises(NotBuilt):
-        Queue().send_message(QueueUrl="q", MessageBody="{}")
 
 
 def test_every_module_imports():

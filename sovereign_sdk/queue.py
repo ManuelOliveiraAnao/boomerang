@@ -1,33 +1,230 @@
-"""SQS-like queue adapter on RabbitMQ (pika). Owner A, task A4.
+"""SQS-compatible queue adapter backed by RabbitMQ (quorum queues + dead-lettering).
 
-Spec: docs/02 §5, docs/15 L15. Stub created by C1: A replaces the bodies.
+Mimics the boto3 SQS client calls ShopLite-style apps use:
+    get_queue_url, send_message, receive_message, delete_message
 
-Proposed for A (L15): ``client()`` and ``get_queue_url()`` open no connection; the first real call does;
-a dropped connection (missed heartbeats) is reopened once; a lock guards the shared BlockingConnection,
-which isn't thread-safe (FastAPI runs sync routes in a thread pool).
+Semantics:
+- At-least-once: a received message stays unacked until delete_message.
+- Visibility timeout: unacked messages older than VisibilityTimeout are rejected (requeue) on the
+  next call to this client, so they are delivered again. If the process dies, RabbitMQ requeues
+  them when the connection closes.
+- Dead-letter queue: quorum queue `x-delivery-limit` + dead-letter routing to "<name>-dlq".
+
+Signatures are explicit on purpose (no **kwargs): C's rules check (rule 7, docs/15 L14) reads them with
+inspect.signature to reject AI-written calls that use arguments the adapter doesn't support. Unsupported
+SQS features (DelaySeconds, MessageAttributes, MessageGroupId, deduplication, AttributeNames,
+ChangeMessageVisibility, FIFO) are therefore rejected at rewrite time, or raise TypeError if called anyway.
+Expiry only happens when the client is called again.
 """
-
 from __future__ import annotations
 
-from boomerang._stub import NotBuilt
+import hashlib
+import os
+import threading
+import time
+import uuid
+from typing import Any, Callable
 
-_DOC = "docs/02 §5"
+import pika
+from pika.exceptions import (AMQPConnectionError, ChannelClosed, ChannelClosedByBroker, ChannelWrongStateError,
+                             StreamLostError, UnroutableError)
+
+DEFAULT_VISIBILITY_S = 30
+POLL_INTERVAL_S = 0.1
+_RECONNECT_ERRORS = (AMQPConnectionError, StreamLostError, ChannelClosed, ChannelWrongStateError)
 
 
-def client() -> Queue:
-    """Reads AMQP_URL."""
-    raise NotBuilt("sovereign_sdk.queue.client", owner="A", doc=_DOC)
+class QueueDoesNotExist(Exception):
+    """Same meaning as SQS QueueDoesNotExist."""
+
+
+class UnsupportedFeature(Exception):
+    """The app uses an SQS feature this adapter does not provide."""
+
+
+def dlq_name(name: str) -> str:
+    return f"{name}-dlq"
+
+
+def queue_arguments(name: str, max_receive_count: int | None) -> dict[str, Any]:
+    """RabbitMQ arguments for a queue. Shared with the Leaseweb generator (definitions.json):
+    a mismatch makes RabbitMQ refuse the declare with PRECONDITION_FAILED.
+
+    SQS maxReceiveCount = how many receives are allowed. RabbitMQ x-delivery-limit = how many
+    returns are allowed before dead-lettering, i.e. maxReceiveCount - 1."""
+    args: dict[str, Any] = {"x-queue-type": "quorum"}
+    if max_receive_count:
+        args.update({"x-delivery-limit": max(max_receive_count - 1, 0),
+                     "x-dead-letter-exchange": "",
+                     "x-dead-letter-routing-key": dlq_name(name)})
+    return args
+
+
+def declare(channel, name: str, max_receive_count: int | None = None) -> None:
+    """Create the queue (and its DLQ) if missing. Idempotent with identical arguments."""
+    if max_receive_count:
+        channel.queue_declare(queue=dlq_name(name), durable=True, arguments={"x-queue-type": "quorum"})
+    channel.queue_declare(queue=name, durable=True, arguments=queue_arguments(name, max_receive_count))
+
+
+def _name_from_url(queue_url: str) -> str:
+    return queue_url.rstrip("/").rsplit("/", 1)[-1]
+
+
+def _md5(body: str) -> str:
+    return hashlib.md5(body.encode("utf-8")).hexdigest()
 
 
 class Queue:
+    def __init__(self, url: str | None = None, channel_factory: Callable[[], Any] | None = None):
+        self._url = url
+        self._factory = channel_factory or self._open_channel
+        self._lock = threading.RLock()
+        self._ch = None
+        self._conn = None
+        self._epoch = 0  # bumps on reconnect; handles from an old channel are invalid
+        self._inflight: dict[str, tuple[int, float, float]] = {}  # handle -> (tag, received_at, visibility)
+
+    # ---------------------------------------------------------------- connection
+    def _open_channel(self):
+        params = pika.URLParameters(self._url or os.environ["AMQP_URL"])
+        params.heartbeat = 0  # BlockingConnection can't service heartbeats while idle
+        params.blocked_connection_timeout = 30
+        self._conn = pika.BlockingConnection(params)
+        ch = self._conn.channel()
+        ch.confirm_delivery()
+        return ch
+
+    def _channel(self):
+        if self._ch is None or not getattr(self._ch, "is_open", True):
+            self._ch = self._factory()
+            self._epoch += 1
+            self._inflight.clear()  # unacked messages on a dead channel are requeued by the broker
+        return self._ch
+
+    def _call(self, fn):
+        """Run fn(channel) under the lock; reconnect once on a dropped connection."""
+        with self._lock:
+            try:
+                return fn(self._channel())
+            except ChannelClosedByBroker:
+                self._ch = None
+                raise
+            except _RECONNECT_ERRORS:
+                self._ch = None
+                return fn(self._channel())
+
+    def close(self) -> None:
+        with self._lock:
+            try:
+                if self._conn is not None and self._conn.is_open:
+                    self._conn.close()
+            finally:
+                self._ch = self._conn = None
+                self._inflight.clear()
+
+    # ---------------------------------------------------------------- SQS API
     def get_queue_url(self, QueueName: str) -> dict:
-        raise NotBuilt("sovereign_sdk.queue.Queue.get_queue_url", owner="A", doc=_DOC)
+        def body(ch):
+            ch.queue_declare(queue=QueueName, passive=True)
+            return {"QueueUrl": f"amqp:///{QueueName}"}
+        try:
+            return self._call(body)
+        except ChannelClosedByBroker as e:
+            if e.reply_code == 404:
+                raise QueueDoesNotExist(QueueName) from e
+            raise
 
     def send_message(self, QueueUrl: str, MessageBody: str) -> dict:
-        raise NotBuilt("sovereign_sdk.queue.Queue.send_message", owner="A", doc=_DOC)
+        message_id = uuid.uuid4().hex
+        name = _name_from_url(QueueUrl)
 
-    def receive_message(self, QueueUrl, MaxNumberOfMessages=1, WaitTimeSeconds=0, VisibilityTimeout=None) -> dict:
-        raise NotBuilt("sovereign_sdk.queue.Queue.receive_message", owner="A", doc=_DOC)
+        def body(ch):
+            ch.basic_publish(exchange="", routing_key=name, body=MessageBody.encode("utf-8"),
+                             properties=pika.BasicProperties(delivery_mode=2, message_id=message_id),
+                             mandatory=True)
+        try:
+            self._call(body)
+        except UnroutableError as e:  # mandatory publish to a queue that does not exist
+            raise QueueDoesNotExist(name) from e
+        return {"MessageId": message_id, "MD5OfMessageBody": _md5(MessageBody)}
 
-    def delete_message(self, QueueUrl, ReceiptHandle) -> dict:
-        raise NotBuilt("sovereign_sdk.queue.Queue.delete_message", owner="A", doc=_DOC)
+    def receive_message(self, QueueUrl: str, MaxNumberOfMessages: int = 1, WaitTimeSeconds: int = 0,
+                        VisibilityTimeout: int | None = None) -> dict:
+        name = _name_from_url(QueueUrl)
+        visibility = DEFAULT_VISIBILITY_S if VisibilityTimeout is None else VisibilityTimeout
+        deadline = time.monotonic() + max(WaitTimeSeconds, 0)
+        messages: list[dict] = []
+        while True:
+            self._expire()
+
+            def body(ch):
+                got = []
+                while len(messages) + len(got) < MaxNumberOfMessages:
+                    method, props, payload = ch.basic_get(queue=name, auto_ack=False)
+                    if method is None:
+                        break
+                    handle = f"{self._epoch}:{method.delivery_tag}:{uuid.uuid4().hex[:8]}"
+                    self._inflight[handle] = (method.delivery_tag, time.monotonic(), visibility)
+                    text = payload.decode("utf-8")
+                    got.append({"MessageId": getattr(props, "message_id", None) or uuid.uuid4().hex,
+                                "ReceiptHandle": handle, "Body": text, "MD5OfBody": _md5(text)})
+                return got
+            try:
+                messages.extend(self._call(body))
+            except ChannelClosedByBroker as e:
+                if e.reply_code == 404:
+                    raise QueueDoesNotExist(name) from e
+                raise
+            if messages or time.monotonic() >= deadline:
+                break
+            time.sleep(POLL_INTERVAL_S)
+        return {"Messages": messages} if messages else {}
+
+    def delete_message(self, QueueUrl: str, ReceiptHandle: str) -> dict:
+        with self._lock:
+            entry = self._inflight.pop(ReceiptHandle, None)
+            if entry is None or not ReceiptHandle.startswith(f"{self._epoch}:"):
+                return {}  # expired (already redelivered) or from a dropped connection: nothing to ack
+            try:
+                self._ch.basic_ack(delivery_tag=entry[0])
+            except _RECONNECT_ERRORS:
+                # connection lost: the broker requeues the message, it will be delivered again
+                # (at-least-once, same as SQS when a delete fails)
+                self._ch = None
+                self._inflight.clear()
+        return {}
+
+    # ---------------------------------------------------------------- helpers
+    def _expire(self) -> None:
+        now = time.monotonic()
+        with self._lock:
+            expired = [h for h, (_, at, vis) in self._inflight.items() if now - at >= vis]
+            for h in expired:
+                tag = self._inflight.pop(h)[0]
+                try:
+                    # basic_reject, not basic_nack: RabbitMQ 4 quorum queues count rejects towards
+                    # x-delivery-limit, but a nack+requeue is redelivered forever (verified on 4.x).
+                    self._channel().basic_reject(delivery_tag=tag, requeue=True)
+                except _RECONNECT_ERRORS:
+                    self._ch = None  # broker requeues everything unacked on that channel anyway
+
+    def depth(self, QueueName: str) -> int:
+        return self._call(lambda ch: ch.queue_declare(queue=QueueName, passive=True).method.message_count)
+
+    def declare(self, QueueName: str, max_receive_count: int | None = None) -> dict:
+        self._call(lambda ch: declare(ch, QueueName, max_receive_count))
+        return {"QueueUrl": f"amqp:///{QueueName}"}
+
+
+_client: Queue | None = None
+_client_lock = threading.Lock()
+
+
+def client() -> Queue:
+    """Module-level singleton, like boto3.client("sqs"). Connects lazily on first call."""
+    global _client
+    with _client_lock:
+        if _client is None:
+            _client = Queue()
+        return _client

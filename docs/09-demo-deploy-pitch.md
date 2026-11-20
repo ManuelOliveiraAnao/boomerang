@@ -11,7 +11,7 @@
 
 | Time | Screen | Say |
 |---|---|---|
-| 0:00 | Title | "Leaving AWS means rewriting code, guessing what breaks, and hoping you can go back. Boomerang shows what breaks, moves you to Leaseweb, proves it, and brings you back." |
+| 0:00 | Title | "Leaving AWS means rewriting code, guessing what breaks, and hoping you can go back. Boomerang shows what breaks, moves you to your own servers (here: a Leaseweb-style setup), proves it, and brings you back." |
 | 0:20 | What breaks | "ShopLite uses DynamoDB, SQS and S3. The scan found every AWS dependency in code **and** Terraform. S3 is green: config only. DynamoDB and SQS are amber: they move through tested adapters, and here's exactly what changes. Three reds: a Lambda trigger, an IAM role and an alarm. We don't fake those; a human handles them." → **Approve** |
 | 0:55 | Code | "A local model on this laptop rewrote each function onto our adapter. Same names, same return values. S3 wasn't touched by AI: that's a config change." |
 | 1:20 | Leaseweb setup | "These are real Leaseweb files: compose, cloud-init, deploy script, backups. Watch: valid → booted → the app's **original** tests, 7 of 7 → health." ✅ |
@@ -26,8 +26,12 @@ Rules: one driver, one speaker; no typing; anything stuck > 10 s → replay, no 
 
 ## 4. Judge Q&A
 
+**Say it clearly:** the target is *any* server that runs Docker; Leaseweb is our example. In the demo the self-hosted stack runs locally in Docker, the same files `deploy.sh` would ship to a real server.
+
+
 | Question | Answer |
 |---|---|
+| Does it only work with Leaseweb? | No. The output is standard Docker Compose + open-source services, and `deploy.sh` works with any SSH server: your own servers, on-premises, or any provider. Leaseweb is our example and the price table we filled in. |
 | Why AI? | It reads code it hasn't seen and maps each call onto our adapters. Everything else is plain code. |
 | Why not Terraform or Kubernetes? | They set up infrastructure; they don't remove AWS from the code. |
 | How do you prove it works? | The same original tests pass on both sides, and data counts and checksums match. |

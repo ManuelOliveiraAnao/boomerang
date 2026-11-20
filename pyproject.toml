@@ -26,6 +26,7 @@ dependencies = [
     "httpx",
     "pytest",
     "streamlit",
+    "moto[server]",           # A: fake AWS for the lab (process backend) and the tests
 ]
 
 [project.optional-dependencies]
@@ -39,9 +40,12 @@ packages = ["boomerang", "sovereign_sdk"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/fixtures and tests/data hold small apps with their own tests: run them via the verifier, not here
+norecursedirs = ["fixtures", "data", ".venv", "runs"]
 markers = [
     "integration: needs Docker and the lab",
     "llm: needs a running model",
+    "slow: takes minutes",
 ]
 # A bare `pytest` never needs Docker or a model; `pytest -m integration` overrides this.
 addopts = '-m "not integration and not llm" --strict-markers'

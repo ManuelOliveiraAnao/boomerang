@@ -1,0 +1,318 @@
+{
+  "findings": [
+    {
+      "analysis": "RabbitMQ requires the queue adapter",
+      "component_id": "order_events",
+      "feature": "send",
+      "light": "amber",
+      "what_changes": "RabbitMQ requires the queue adapter",
+      "evidence": [
+        {
+          "file": "app/queue.py",
+          "line": 19,
+          "symbol": "publish_order_created",
+          "operation": "send_message",
+          "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 23,
+          "symbol": "receive_one",
+          "operation": "receive_message",
+          "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 33,
+          "symbol": "ack",
+          "operation": "delete_message",
+          "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 14,
+          "symbol": "_url",
+          "operation": "get_queue_url",
+          "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+        }
+      ]
+    },
+    {
+      "analysis": "Visibility timeout is emulated by redelivery",
+      "component_id": "order_events",
+      "feature": "receive",
+      "light": "amber",
+      "what_changes": "Visibility timeout is emulated by redelivery",
+      "evidence": [
+        {
+          "file": "app/queue.py",
+          "line": 19,
+          "symbol": "publish_order_created",
+          "operation": "send_message",
+          "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 23,
+          "symbol": "receive_one",
+          "operation": "receive_message",
+          "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 33,
+          "symbol": "ack",
+          "operation": "delete_message",
+          "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 14,
+          "symbol": "_url",
+          "operation": "get_queue_url",
+          "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+        }
+      ]
+    },
+    {
+      "analysis": "RabbitMQ acknowledgement differs from SQS deletion",
+      "component_id": "order_events",
+      "feature": "delete",
+      "light": "amber",
+      "what_changes": "RabbitMQ acknowledgement differs from SQS deletion",
+      "evidence": [
+        {
+          "file": "app/queue.py",
+          "line": 19,
+          "symbol": "publish_order_created",
+          "operation": "send_message",
+          "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 23,
+          "symbol": "receive_one",
+          "operation": "receive_message",
+          "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 33,
+          "symbol": "ack",
+          "operation": "delete_message",
+          "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 14,
+          "symbol": "_url",
+          "operation": "get_queue_url",
+          "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+        }
+      ]
+    },
+    {
+      "analysis": "RabbitMQ redelivery emulates visibility timeout",
+      "component_id": "order_events",
+      "feature": "visibility_timeout",
+      "light": "amber",
+      "what_changes": "RabbitMQ redelivery emulates visibility timeout",
+      "evidence": [
+        {
+          "file": "app/queue.py",
+          "line": 19,
+          "symbol": "publish_order_created",
+          "operation": "send_message",
+          "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 23,
+          "symbol": "receive_one",
+          "operation": "receive_message",
+          "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 33,
+          "symbol": "ack",
+          "operation": "delete_message",
+          "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 14,
+          "symbol": "_url",
+          "operation": "get_queue_url",
+          "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+        }
+      ]
+    },
+    {
+      "analysis": "RabbitMQ dead-letter exchange emulates the DLQ",
+      "component_id": "order_events",
+      "feature": "dlq",
+      "light": "amber",
+      "what_changes": "RabbitMQ dead-letter exchange emulates the DLQ",
+      "evidence": [
+        {
+          "file": "app/queue.py",
+          "line": 19,
+          "symbol": "publish_order_created",
+          "operation": "send_message",
+          "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 23,
+          "symbol": "receive_one",
+          "operation": "receive_message",
+          "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 33,
+          "symbol": "ack",
+          "operation": "delete_message",
+          "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 14,
+          "symbol": "_url",
+          "operation": "get_queue_url",
+          "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+        }
+      ]
+    },
+    {
+      "analysis": "S3-compatible API; endpoint and keys change only",
+      "component_id": "receipts",
+      "feature": "put",
+      "light": "green",
+      "what_changes": "S3-compatible API; endpoint and keys change only",
+      "evidence": [
+        {
+          "file": "app/storage.py",
+          "line": 16,
+          "symbol": "put_receipt",
+          "operation": "put_object",
+          "snippet": "s3.put_object(Bucket=_bucket(), Key=key, Body=json.dumps(receipt).encode(\"utf-8\"),\n                  ContentType=\"application/json\")"
+        },
+        {
+          "file": "app/storage.py",
+          "line": 23,
+          "symbol": "get_receipt",
+          "operation": "get_object",
+          "snippet": "s3.get_object(Bucket=_bucket(), Key=f\"receipts/{order_id}.json\")"
+        }
+      ]
+    },
+    {
+      "analysis": "S3-compatible API; endpoint and keys change only",
+      "component_id": "receipts",
+      "feature": "get",
+      "light": "green",
+      "what_changes": "S3-compatible API; endpoint and keys change only",
+      "evidence": [
+        {
+          "file": "app/storage.py",
+          "line": 16,
+          "symbol": "put_receipt",
+          "operation": "put_object",
+          "snippet": "s3.put_object(Bucket=_bucket(), Key=key, Body=json.dumps(receipt).encode(\"utf-8\"),\n                  ContentType=\"application/json\")"
+        },
+        {
+          "file": "app/storage.py",
+          "line": 23,
+          "symbol": "get_receipt",
+          "operation": "get_object",
+          "snippet": "s3.get_object(Bucket=_bucket(), Key=f\"receipts/{order_id}.json\")"
+        }
+      ]
+    },
+    {
+      "analysis": "Lambda functions are not migrated",
+      "component_id": "receipt_thumbnailer",
+      "feature": "event_notification",
+      "light": "red",
+      "what_changes": "Lambda functions are not migrated",
+      "evidence": []
+    },
+    {
+      "analysis": "Postgres adapter uses a generated index for the GSI",
+      "component_id": "orders",
+      "feature": "gsi",
+      "light": "amber",
+      "what_changes": "Postgres adapter uses a generated index for the GSI",
+      "evidence": []
+    },
+    {
+      "analysis": "RabbitMQ requires the queue adapter",
+      "component_id": "order_events_dlq",
+      "feature": "send",
+      "light": "amber",
+      "what_changes": "RabbitMQ requires the queue adapter",
+      "evidence": []
+    },
+    {
+      "analysis": "Visibility timeout is emulated by redelivery",
+      "component_id": "order_events_dlq",
+      "feature": "receive",
+      "light": "amber",
+      "what_changes": "Visibility timeout is emulated by redelivery",
+      "evidence": []
+    },
+    {
+      "analysis": "RabbitMQ acknowledgement differs from SQS deletion",
+      "component_id": "order_events_dlq",
+      "feature": "delete",
+      "light": "amber",
+      "what_changes": "RabbitMQ acknowledgement differs from SQS deletion",
+      "evidence": []
+    },
+    {
+      "analysis": "RabbitMQ redelivery emulates visibility timeout",
+      "component_id": "order_events_dlq",
+      "feature": "visibility_timeout",
+      "light": "amber",
+      "what_changes": "RabbitMQ redelivery emulates visibility timeout",
+      "evidence": []
+    },
+    {
+      "analysis": "RabbitMQ dead-letter exchange emulates the DLQ",
+      "component_id": "order_events_dlq",
+      "feature": "dlq",
+      "light": "amber",
+      "what_changes": "RabbitMQ dead-letter exchange emulates the DLQ",
+      "evidence": []
+    },
+    {
+      "analysis": "IAM credentials are replaced with scoped credentials",
+      "component_id": "shoplite_task",
+      "feature": "role",
+      "light": "red",
+      "what_changes": "IAM credentials are replaced with scoped credentials",
+      "evidence": []
+    },
+    {
+      "analysis": "IAM credentials are replaced with scoped credentials",
+      "component_id": "shoplite_task",
+      "feature": "policy",
+      "light": "red",
+      "what_changes": "IAM credentials are replaced with scoped credentials",
+      "evidence": []
+    },
+    {
+      "analysis": "CloudWatch alarms are not migrated",
+      "component_id": "dlq_not_empty",
+      "feature": "alarm",
+      "light": "red",
+      "what_changes": "CloudWatch alarms are not migrated",
+      "evidence": []
+    }
+  ],
+  "overall": "red",
+  "summary": "17 migration findings",
+  "source": "B assess() on scan_static(A sample-app/aws), generated 2026-11-20"
+}

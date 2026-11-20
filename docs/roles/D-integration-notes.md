@@ -56,3 +56,11 @@ Snapshot of `origin/role-a-platform-plan` (A) and `origin/Francisco-membro-b-dev
 3. **B's modules return dicts and don't import `models.py`.** Fine for the UI, but the pipeline (C) will need `Assessment.model_validate(...)` at the boundary.
 4. **Generator default output is `runs/leaseweb/`**, not `runs/<id>/leaseweb/`. The pipeline must pass `out_dir`, or replay can't find the files per run.
 5. **Secrets on screen:** see Tab 3.
+
+## 4. Found while building D3 (tell B)
+Ran B's `scan_static()` + `assess()` on A's real ShopLite (`sample-app/aws`). Output saved as `fixtures/pam.scanned.json` and `fixtures/assessment.json`.
+- **`orders` (DynamoDB) has 0 code usages:** the scanner misses every call in `app/db.py`, so the DynamoDB card shows no evidence. It also loses `conditional_write`.
+- **Features with no rule are dropped silently:** S3 `list` / `delete` and DynamoDB `put/get/update/delete/query` produce no finding. Either add rules or show them as 🟢/🟠 explicitly.
+- **`order_events_dlq` appears as its own queue** with the full feature list of the main queue; it should be folded into `order_events` (the DLQ is a feature, not a second component).
+- **`app_name` is `"aws"`** (the folder name) instead of `ShopLite`, and `entrypoints` is empty.
+- Every finding of a component repeats **all** of that component's usages as evidence; the UI dedupes, but per-feature evidence would be more precise.

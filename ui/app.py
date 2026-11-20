@@ -92,7 +92,7 @@ with right:
 
 # Pipeline strip (Terraform-style plan → approve → apply)
 status = data.stage_status(src.events)
-if ss.approved and "approve" in status:
+if ss.approved:
     status["approve"] = "done"
 steps = "".join(
     f'<div class="bm-step {status.get(key, "")}"><b>{label}</b>'

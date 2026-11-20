@@ -1,0 +1,18 @@
+{"ts":1795174504.660877,"run_id":"demo","stage":"scan","level":"info","message":"scanning sample-app/aws (code, Terraform, Dockerfile, env)","data":null}
+{"ts":1795174507.660877,"run_id":"demo","stage":"scan","level":"success","message":"7 components found","data":null}
+{"ts":1795174508.660877,"run_id":"demo","stage":"assess","level":"success","message":"traffic lights ready","data":{"findings":24}}
+{"ts":1795174509.660877,"run_id":"demo","stage":"approve","level":"info","message":"awaiting approval","data":null}
+{"ts":1795174524.660877,"run_id":"demo","stage":"approve","level":"success","message":"plan approved (ui)","data":null}
+{"ts":1795174526.660877,"run_id":"demo","stage":"delock","level":"info","message":"client swaps: storage, queue, db","data":null}
+{"ts":1795174544.660877,"run_id":"demo","stage":"delock","level":"success","message":"app/db.py:list_orders_by_customer rewritten (ai)","data":null}
+{"ts":1795174545.660877,"run_id":"demo","stage":"delock","level":"success","message":"8 functions mapped 1:1, checked by code","data":null}
+{"ts":1795174549.660877,"run_id":"demo","stage":"generate","level":"success","message":"13 Leaseweb files written","data":null}
+{"ts":1795174554.660877,"run_id":"demo","stage":"verify","level":"info","message":"booting the Leaseweb stack","data":null}
+{"ts":1795174599.660877,"run_id":"demo","stage":"verify","level":"warning","message":"tests: 6/7 passed (attempt 1)","data":null}
+{"ts":1795174614.660877,"run_id":"demo","stage":"fix","level":"success","message":"app/db.py:_from_ddb fixed (attempt 1)","data":null}
+{"ts":1795174664.660877,"run_id":"demo","stage":"verify","level":"success","message":"tests: 7/7 passed (attempt 2) · health OK","data":null}
+{"ts":1795174674.660877,"run_id":"demo","stage":"data","level":"success","message":"aws->leaseweb: orders 25/25, receipts 25/25, messages 3/3","data":null}
+{"ts":1795174764.660877,"run_id":"demo","stage":"rollback","level":"info","message":"write freeze; new order created on Leaseweb","data":null}
+{"ts":1795174834.660877,"run_id":"demo","stage":"data","level":"success","message":"leaseweb->aws: orders 26/26, receipts 25/25, messages 4/4","data":null}
+{"ts":1795174904.660877,"run_id":"demo","stage":"rollback","level":"success","message":"original tests on AWS: 7/7 · round trip passed","data":null}
+{"ts":1795174916.660877,"run_id":"demo","stage":"report","level":"success","message":"run passed","data":null}

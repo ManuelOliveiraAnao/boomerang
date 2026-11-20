@@ -1,0 +1,7 @@
+--- a/app/db.py
++++ b/app/db.py
+@@ -1 +1,3 @@
+-dynamodb = boto3.resource("dynamodb")
++from sovereign_sdk import kv
++
++dynamodb = kv.resource()

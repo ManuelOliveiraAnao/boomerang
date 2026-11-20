@@ -399,6 +399,5 @@
     }
   ],
   "overall": "red",
-  "summary": "24 migration findings",
-  "source": "B assess() on scan_static(A sample-app/aws), B@680c7c6 A@483afdb, 2026-11-20"
+  "summary": "24 migration findings"
 }

@@ -117,7 +117,7 @@ def _component_card(row: dict) -> None:
 
 
 def render(src: Source) -> None:
-    assessment = src.json("assessment")
+    assessment = src.json("assessment") or src.summary.get("assessment")
     if assessment is None:
         empty_state("No assessment yet", "Run a scan, or add fixtures/assessment.json.")
         return
@@ -132,7 +132,9 @@ def render(src: Source) -> None:
     c1.metric(":green[●] Config only", count["green"])
     c2.metric(":orange[●] Via adapter", count["amber"])
     c3.metric(":red[●] Needs a human", count["red"])
-    lock = src.json("lockin")
+    summ = src.summary
+    lock = ({"before": summ["lock_in_before"], "after": summ.get("lock_in_after") or 0}
+            if summ.get("lock_in_before") else src.json("lockin"))
     if lock and lock.get("before"):
         removed = round(100 * (1 - lock["after"] / lock["before"]))
         c4.metric("Lock-in removed", f"{removed}%",

@@ -57,6 +57,20 @@ Snapshot of `origin/role-a-platform-plan` (A) and `origin/Francisco-membro-b-dev
 4. **Generator default output is `runs/leaseweb/`**, not `runs/<id>/leaseweb/`. The pipeline must pass `out_dir`, or replay can't find the files per run.
 5. **Secrets on screen:** see Tab 3.
 
+## 6. After C1 (role-c@93b5ae2, member-b-after-c1@881f83e)
+
+C pushed the scaffold: `models.py` (+ `GeneratedFile`, `RewriteRecord`, `Approval`, new `RunSummary` fields), `events.py`, `pipeline.py` stubs, `cli.py`, `config.py`, and stubs for everyone's modules. What D did to match:
+- **Run folder is the UI's only input** (docs/15 §5): `run.json` (RunSummary), `events.jsonl`, `assessment.json`, `delock.json`, `diffs/`, `leaseweb/`. The UI fixture is now `fixtures/run-demo/` in exactly that layout (see its README for what is real and what is illustrative); `fixtures/assessment.json`, `lockin.json`, `pam.scanned.json` were removed.
+- **Tabs 2–4 built on C's models:** Code reads `rewrites` (`RewriteRecord.kind` ai / config / fix, `changed_lines`, `diff_path`, `tests_unchanged`); Leaseweb setup reads `verifications` + `baseline` and browses `leaseweb/`; Data & round trip reads `data_moves`, `roundtrip`, `roundtrip_checks`, `roundtrip_tests`, `lost`.
+- **⚠️ banner** when `run.json` has `fixtures_used`; **info banner** when `llm` says "cloud fallback" (S5).
+- **`cost.estimate()`** added (C1's binding name); `compute()` stays. C's stub `boomerang/cost.py` will conflict with D's at merge: **keep D's file**.
+- **Still to wire (needs C4):** sidebar buttons → subprocess `boomerang plan` / `approve <id>` / `execute <id>` (L2), tail `events.jsonl` + `run.json`; Approve button → `boomerang approve <run_id>` with `approved_by="ui"`.
+
+**New bugs found while building the fixture (tell B):**
+- `generators.leaseweb.render()` **crashes on the scanner's own PAM**: `UnsupportedFeature: A KV table must have a partition key`; the static scan doesn't fill `partition_key`/`indexes` from Terraform. Works on the hand-written `fixtures/pam.aws.json`.
+- `rabbitmq/definitions.json` and `seaweedfs/s3.json` contain the **real generated passwords/keys** (the compose file correctly uses `${VARS}`). The UI masks them; the files themselves still hold secrets.
+- `laptop.env` (with credentials) is **not git-ignored**; only `secrets.env` is.
+
 ## 5. Review: does the UI match the project? (B@680c7c6, A@483afdb, no C branch)
 
 **Matches the spec ([05](../05-ui.md), README):** sidebar (source app, Migrate, Round trip, Live/Replay, LLM badge) · 5 tabs · What breaks has lights, evidence, counters, lock-in, red box, Approve · Costs follows [12](../12-costs.md) exactly (sources, missing-price refusal, ops hours, EU Data Act date) · the landing page's 9 steps, 3 lights, round trip and "never claim" list match the README and [09](../09-demo-deploy-pitch.md). Extra vs spec: the Overview landing page.

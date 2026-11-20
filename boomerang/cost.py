@@ -214,3 +214,11 @@ def compute(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = Non
         "region": prices.get("region", {}),
         "as_of": today.isoformat(),
     }
+
+
+CostReport = dict  # C1's stub names the return type CostReport; it's the dict compute() returns.
+
+
+def estimate(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = None) -> CostReport:
+    """C1's binding name (docs/03 §3.13): same as compute()."""
+    return compute(prices, usage, ops, today=today)

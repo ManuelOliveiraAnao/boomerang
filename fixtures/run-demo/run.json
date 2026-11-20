@@ -1,0 +1,901 @@
+{
+  "run_id": "demo",
+  "source_dir": "sample-app/aws",
+  "status": "passed",
+  "started_at": 1795174504.660877,
+  "finished_at": 1795174916.660877,
+  "lock_in_before": 695,
+  "lock_in_after": 185,
+  "assessment": {
+    "findings": [
+      {
+        "analysis": "RabbitMQ requires the queue adapter",
+        "component_id": "order_events",
+        "feature": "send",
+        "light": "amber",
+        "what_changes": "RabbitMQ requires the queue adapter",
+        "evidence": [
+          {
+            "file": "app/queue.py",
+            "line": 19,
+            "symbol": "publish_order_created",
+            "operation": "send_message",
+            "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 23,
+            "symbol": "receive_one",
+            "operation": "receive_message",
+            "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 33,
+            "symbol": "ack",
+            "operation": "delete_message",
+            "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 14,
+            "symbol": "_url",
+            "operation": "get_queue_url",
+            "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+          }
+        ]
+      },
+      {
+        "analysis": "Visibility timeout is emulated by redelivery",
+        "component_id": "order_events",
+        "feature": "receive",
+        "light": "amber",
+        "what_changes": "Visibility timeout is emulated by redelivery",
+        "evidence": [
+          {
+            "file": "app/queue.py",
+            "line": 19,
+            "symbol": "publish_order_created",
+            "operation": "send_message",
+            "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 23,
+            "symbol": "receive_one",
+            "operation": "receive_message",
+            "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 33,
+            "symbol": "ack",
+            "operation": "delete_message",
+            "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 14,
+            "symbol": "_url",
+            "operation": "get_queue_url",
+            "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+          }
+        ]
+      },
+      {
+        "analysis": "RabbitMQ acknowledgement differs from SQS deletion",
+        "component_id": "order_events",
+        "feature": "delete",
+        "light": "amber",
+        "what_changes": "RabbitMQ acknowledgement differs from SQS deletion",
+        "evidence": [
+          {
+            "file": "app/queue.py",
+            "line": 19,
+            "symbol": "publish_order_created",
+            "operation": "send_message",
+            "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 23,
+            "symbol": "receive_one",
+            "operation": "receive_message",
+            "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 33,
+            "symbol": "ack",
+            "operation": "delete_message",
+            "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 14,
+            "symbol": "_url",
+            "operation": "get_queue_url",
+            "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+          }
+        ]
+      },
+      {
+        "analysis": "RabbitMQ redelivery emulates visibility timeout",
+        "component_id": "order_events",
+        "feature": "visibility_timeout",
+        "light": "amber",
+        "what_changes": "RabbitMQ redelivery emulates visibility timeout",
+        "evidence": [
+          {
+            "file": "app/queue.py",
+            "line": 19,
+            "symbol": "publish_order_created",
+            "operation": "send_message",
+            "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 23,
+            "symbol": "receive_one",
+            "operation": "receive_message",
+            "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 33,
+            "symbol": "ack",
+            "operation": "delete_message",
+            "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 14,
+            "symbol": "_url",
+            "operation": "get_queue_url",
+            "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+          }
+        ]
+      },
+      {
+        "analysis": "RabbitMQ dead-letter exchange emulates the DLQ",
+        "component_id": "order_events",
+        "feature": "dlq",
+        "light": "amber",
+        "what_changes": "RabbitMQ dead-letter exchange emulates the DLQ",
+        "evidence": [
+          {
+            "file": "app/queue.py",
+            "line": 19,
+            "symbol": "publish_order_created",
+            "operation": "send_message",
+            "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 23,
+            "symbol": "receive_one",
+            "operation": "receive_message",
+            "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 33,
+            "symbol": "ack",
+            "operation": "delete_message",
+            "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+          },
+          {
+            "file": "app/queue.py",
+            "line": 14,
+            "symbol": "_url",
+            "operation": "get_queue_url",
+            "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+          }
+        ]
+      },
+      {
+        "analysis": "S3-compatible API; endpoint and keys change only",
+        "component_id": "receipts",
+        "feature": "put",
+        "light": "green",
+        "what_changes": "S3-compatible API; endpoint and keys change only",
+        "evidence": [
+          {
+            "file": "app/storage.py",
+            "line": 16,
+            "symbol": "put_receipt",
+            "operation": "put_object",
+            "snippet": "s3.put_object(Bucket=_bucket(), Key=key, Body=json.dumps(receipt).encode(\"utf-8\"),\n                  ContentType=\"application/json\")"
+          },
+          {
+            "file": "app/storage.py",
+            "line": 23,
+            "symbol": "get_receipt",
+            "operation": "get_object",
+            "snippet": "s3.get_object(Bucket=_bucket(), Key=f\"receipts/{order_id}.json\")"
+          }
+        ]
+      },
+      {
+        "analysis": "S3-compatible API; endpoint and keys change only",
+        "component_id": "receipts",
+        "feature": "get",
+        "light": "green",
+        "what_changes": "S3-compatible API; endpoint and keys change only",
+        "evidence": [
+          {
+            "file": "app/storage.py",
+            "line": 16,
+            "symbol": "put_receipt",
+            "operation": "put_object",
+            "snippet": "s3.put_object(Bucket=_bucket(), Key=key, Body=json.dumps(receipt).encode(\"utf-8\"),\n                  ContentType=\"application/json\")"
+          },
+          {
+            "file": "app/storage.py",
+            "line": 23,
+            "symbol": "get_receipt",
+            "operation": "get_object",
+            "snippet": "s3.get_object(Bucket=_bucket(), Key=f\"receipts/{order_id}.json\")"
+          }
+        ]
+      },
+      {
+        "analysis": "S3-compatible API; list behavior is preserved",
+        "component_id": "receipts",
+        "feature": "list",
+        "light": "green",
+        "what_changes": "S3-compatible API; list behavior is preserved",
+        "evidence": [
+          {
+            "file": "app/storage.py",
+            "line": 16,
+            "symbol": "put_receipt",
+            "operation": "put_object",
+            "snippet": "s3.put_object(Bucket=_bucket(), Key=key, Body=json.dumps(receipt).encode(\"utf-8\"),\n                  ContentType=\"application/json\")"
+          },
+          {
+            "file": "app/storage.py",
+            "line": 23,
+            "symbol": "get_receipt",
+            "operation": "get_object",
+            "snippet": "s3.get_object(Bucket=_bucket(), Key=f\"receipts/{order_id}.json\")"
+          }
+        ]
+      },
+      {
+        "analysis": "S3-compatible API; delete behavior is preserved",
+        "component_id": "receipts",
+        "feature": "delete",
+        "light": "green",
+        "what_changes": "S3-compatible API; delete behavior is preserved",
+        "evidence": [
+          {
+            "file": "app/storage.py",
+            "line": 16,
+            "symbol": "put_receipt",
+            "operation": "put_object",
+            "snippet": "s3.put_object(Bucket=_bucket(), Key=key, Body=json.dumps(receipt).encode(\"utf-8\"),\n                  ContentType=\"application/json\")"
+          },
+          {
+            "file": "app/storage.py",
+            "line": 23,
+            "symbol": "get_receipt",
+            "operation": "get_object",
+            "snippet": "s3.get_object(Bucket=_bucket(), Key=f\"receipts/{order_id}.json\")"
+          }
+        ]
+      },
+      {
+        "analysis": "Lambda functions are not migrated",
+        "component_id": "receipt_thumbnailer",
+        "feature": "event_notification",
+        "light": "red",
+        "what_changes": "Lambda functions are not migrated",
+        "evidence": []
+      },
+      {
+        "analysis": "Postgres adapter changes the DynamoDB storage implementation",
+        "component_id": "orders",
+        "feature": "put",
+        "light": "amber",
+        "what_changes": "Postgres adapter changes the DynamoDB storage implementation",
+        "evidence": []
+      },
+      {
+        "analysis": "Postgres adapter changes the DynamoDB storage implementation",
+        "component_id": "orders",
+        "feature": "get",
+        "light": "amber",
+        "what_changes": "Postgres adapter changes the DynamoDB storage implementation",
+        "evidence": []
+      },
+      {
+        "analysis": "Postgres adapter supports SET updates",
+        "component_id": "orders",
+        "feature": "update",
+        "light": "amber",
+        "what_changes": "Postgres adapter supports SET updates",
+        "evidence": []
+      },
+      {
+        "analysis": "Postgres adapter changes the DynamoDB storage implementation",
+        "component_id": "orders",
+        "feature": "delete",
+        "light": "amber",
+        "what_changes": "Postgres adapter changes the DynamoDB storage implementation",
+        "evidence": []
+      },
+      {
+        "analysis": "Postgres adapter emulates key and GSI queries",
+        "component_id": "orders",
+        "feature": "query",
+        "light": "amber",
+        "what_changes": "Postgres adapter emulates key and GSI queries",
+        "evidence": []
+      },
+      {
+        "analysis": "Postgres adapter uses a generated index for the GSI",
+        "component_id": "orders",
+        "feature": "gsi",
+        "light": "amber",
+        "what_changes": "Postgres adapter uses a generated index for the GSI",
+        "evidence": []
+      },
+      {
+        "analysis": "RabbitMQ requires the queue adapter",
+        "component_id": "order_events_dlq",
+        "feature": "send",
+        "light": "amber",
+        "what_changes": "RabbitMQ requires the queue adapter",
+        "evidence": []
+      },
+      {
+        "analysis": "Visibility timeout is emulated by redelivery",
+        "component_id": "order_events_dlq",
+        "feature": "receive",
+        "light": "amber",
+        "what_changes": "Visibility timeout is emulated by redelivery",
+        "evidence": []
+      },
+      {
+        "analysis": "RabbitMQ acknowledgement differs from SQS deletion",
+        "component_id": "order_events_dlq",
+        "feature": "delete",
+        "light": "amber",
+        "what_changes": "RabbitMQ acknowledgement differs from SQS deletion",
+        "evidence": []
+      },
+      {
+        "analysis": "RabbitMQ redelivery emulates visibility timeout",
+        "component_id": "order_events_dlq",
+        "feature": "visibility_timeout",
+        "light": "amber",
+        "what_changes": "RabbitMQ redelivery emulates visibility timeout",
+        "evidence": []
+      },
+      {
+        "analysis": "RabbitMQ dead-letter exchange emulates the DLQ",
+        "component_id": "order_events_dlq",
+        "feature": "dlq",
+        "light": "amber",
+        "what_changes": "RabbitMQ dead-letter exchange emulates the DLQ",
+        "evidence": []
+      },
+      {
+        "analysis": "IAM credentials are replaced with scoped credentials",
+        "component_id": "shoplite_task",
+        "feature": "role",
+        "light": "red",
+        "what_changes": "IAM credentials are replaced with scoped credentials",
+        "evidence": []
+      },
+      {
+        "analysis": "IAM credentials are replaced with scoped credentials",
+        "component_id": "shoplite_task",
+        "feature": "policy",
+        "light": "red",
+        "what_changes": "IAM credentials are replaced with scoped credentials",
+        "evidence": []
+      },
+      {
+        "analysis": "CloudWatch alarms are not migrated",
+        "component_id": "dlq_not_empty",
+        "feature": "alarm",
+        "light": "red",
+        "what_changes": "CloudWatch alarms are not migrated",
+        "evidence": []
+      }
+    ],
+    "overall": "red",
+    "summary": "24 migration findings"
+  },
+  "verifications": [
+    {
+      "checks": [
+        {
+          "name": "config",
+          "ok": true,
+          "detail": "docker compose config OK",
+          "duration_s": 0.8
+        },
+        {
+          "name": "boot",
+          "ok": true,
+          "detail": "postgres, rabbitmq, seaweedfs, api, worker healthy",
+          "duration_s": 41.3
+        },
+        {
+          "name": "schema",
+          "ok": true,
+          "detail": "orders: table + customer_id-index",
+          "duration_s": 0.3
+        },
+        {
+          "name": "tests",
+          "ok": false,
+          "detail": "6/7 passed",
+          "duration_s": 4.2
+        },
+        {
+          "name": "health",
+          "ok": false,
+          "detail": "skipped",
+          "duration_s": 0.1
+        }
+      ],
+      "tests": {
+        "attempt": 1,
+        "platform": "leaseweb",
+        "passed": 6,
+        "failed": 1,
+        "errors": 0,
+        "total": 7,
+        "duration_s": 4.2,
+        "failures": [
+          {
+            "test": "tests/test_orders.py::test_order_total_is_number",
+            "message": "assert 12 == 12.5",
+            "traceback": "E   assert 12 == 12.5\nE    +  where 12 = resp.json()['total']"
+          }
+        ],
+        "output_tail": ""
+      }
+    },
+    {
+      "checks": [
+        {
+          "name": "config",
+          "ok": true,
+          "detail": "docker compose config OK",
+          "duration_s": 0.8
+        },
+        {
+          "name": "boot",
+          "ok": true,
+          "detail": "postgres, rabbitmq, seaweedfs, api, worker healthy",
+          "duration_s": 41.3
+        },
+        {
+          "name": "schema",
+          "ok": true,
+          "detail": "orders: table + customer_id-index",
+          "duration_s": 0.3
+        },
+        {
+          "name": "tests",
+          "ok": true,
+          "detail": "7/7 passed",
+          "duration_s": 4.2
+        },
+        {
+          "name": "health",
+          "ok": true,
+          "detail": "GET /health 200",
+          "duration_s": 0.1
+        }
+      ],
+      "tests": {
+        "attempt": 2,
+        "platform": "leaseweb",
+        "passed": 7,
+        "failed": 0,
+        "errors": 0,
+        "total": 7,
+        "duration_s": 4.2,
+        "failures": [],
+        "output_tail": ""
+      }
+    }
+  ],
+  "data_moves": [
+    {
+      "direction": "aws->leaseweb",
+      "counts": [
+        {
+          "component_id": "orders",
+          "kind": "kv_table",
+          "source_count": 25,
+          "target_count": 25,
+          "checksum_match": true,
+          "notes": []
+        },
+        {
+          "component_id": "receipts",
+          "kind": "object_store",
+          "source_count": 25,
+          "target_count": 25,
+          "checksum_match": true,
+          "notes": []
+        },
+        {
+          "component_id": "order_events",
+          "kind": "queue",
+          "source_count": 3,
+          "target_count": 3,
+          "checksum_match": null,
+          "notes": [
+            "pending messages copied; order not checked"
+          ]
+        }
+      ]
+    },
+    {
+      "direction": "leaseweb->aws",
+      "counts": [
+        {
+          "component_id": "orders",
+          "kind": "kv_table",
+          "source_count": 26,
+          "target_count": 26,
+          "checksum_match": true,
+          "notes": []
+        },
+        {
+          "component_id": "receipts",
+          "kind": "object_store",
+          "source_count": 25,
+          "target_count": 25,
+          "checksum_match": true,
+          "notes": []
+        },
+        {
+          "component_id": "order_events",
+          "kind": "queue",
+          "source_count": 4,
+          "target_count": 4,
+          "checksum_match": null,
+          "notes": []
+        }
+      ]
+    }
+  ],
+  "lost": [
+    {
+      "component_id": "order_events",
+      "feature": "send",
+      "status": "changed",
+      "detail": "RabbitMQ requires the queue adapter"
+    },
+    {
+      "component_id": "order_events",
+      "feature": "receive",
+      "status": "changed",
+      "detail": "Visibility timeout is emulated by redelivery"
+    },
+    {
+      "component_id": "order_events",
+      "feature": "delete",
+      "status": "changed",
+      "detail": "RabbitMQ acknowledgement differs from SQS deletion"
+    },
+    {
+      "component_id": "order_events",
+      "feature": "visibility_timeout",
+      "status": "changed",
+      "detail": "RabbitMQ redelivery emulates visibility timeout"
+    },
+    {
+      "component_id": "order_events",
+      "feature": "dlq",
+      "status": "changed",
+      "detail": "RabbitMQ dead-letter exchange emulates the DLQ"
+    },
+    {
+      "component_id": "receipts",
+      "feature": "put",
+      "status": "preserved",
+      "detail": "S3-compatible API; endpoint and keys change only"
+    },
+    {
+      "component_id": "receipts",
+      "feature": "get",
+      "status": "preserved",
+      "detail": "S3-compatible API; endpoint and keys change only"
+    },
+    {
+      "component_id": "receipts",
+      "feature": "list",
+      "status": "preserved",
+      "detail": "S3-compatible API; list behavior is preserved"
+    },
+    {
+      "component_id": "receipts",
+      "feature": "delete",
+      "status": "preserved",
+      "detail": "S3-compatible API; delete behavior is preserved"
+    },
+    {
+      "component_id": "receipt_thumbnailer",
+      "feature": "event_notification",
+      "status": "lost",
+      "detail": "Lambda functions are not migrated"
+    },
+    {
+      "component_id": "orders",
+      "feature": "put",
+      "status": "changed",
+      "detail": "Postgres adapter changes the DynamoDB storage implementation"
+    },
+    {
+      "component_id": "orders",
+      "feature": "get",
+      "status": "changed",
+      "detail": "Postgres adapter changes the DynamoDB storage implementation"
+    },
+    {
+      "component_id": "orders",
+      "feature": "update",
+      "status": "changed",
+      "detail": "Postgres adapter supports SET updates"
+    },
+    {
+      "component_id": "orders",
+      "feature": "delete",
+      "status": "changed",
+      "detail": "Postgres adapter changes the DynamoDB storage implementation"
+    },
+    {
+      "component_id": "orders",
+      "feature": "query",
+      "status": "changed",
+      "detail": "Postgres adapter emulates key and GSI queries"
+    },
+    {
+      "component_id": "orders",
+      "feature": "gsi",
+      "status": "changed",
+      "detail": "Postgres adapter uses a generated index for the GSI"
+    },
+    {
+      "component_id": "order_events_dlq",
+      "feature": "send",
+      "status": "changed",
+      "detail": "RabbitMQ requires the queue adapter"
+    },
+    {
+      "component_id": "order_events_dlq",
+      "feature": "receive",
+      "status": "changed",
+      "detail": "Visibility timeout is emulated by redelivery"
+    },
+    {
+      "component_id": "order_events_dlq",
+      "feature": "delete",
+      "status": "changed",
+      "detail": "RabbitMQ acknowledgement differs from SQS deletion"
+    },
+    {
+      "component_id": "order_events_dlq",
+      "feature": "visibility_timeout",
+      "status": "changed",
+      "detail": "RabbitMQ redelivery emulates visibility timeout"
+    },
+    {
+      "component_id": "order_events_dlq",
+      "feature": "dlq",
+      "status": "changed",
+      "detail": "RabbitMQ dead-letter exchange emulates the DLQ"
+    },
+    {
+      "component_id": "shoplite_task",
+      "feature": "role",
+      "status": "lost",
+      "detail": "IAM credentials are replaced with scoped credentials"
+    },
+    {
+      "component_id": "shoplite_task",
+      "feature": "policy",
+      "status": "lost",
+      "detail": "IAM credentials are replaced with scoped credentials"
+    },
+    {
+      "component_id": "dlq_not_empty",
+      "feature": "alarm",
+      "status": "lost",
+      "detail": "CloudWatch alarms are not migrated"
+    }
+  ],
+  "out_dir": "runs/demo",
+  "baseline": {
+    "attempt": 0,
+    "platform": "aws",
+    "passed": 7,
+    "failed": 0,
+    "errors": 0,
+    "total": 7,
+    "duration_s": 4.2,
+    "failures": [],
+    "output_tail": ""
+  },
+  "rewrites": [
+    {
+      "file": "app/storage.py",
+      "function": "module",
+      "kind": "config",
+      "attempt": 0,
+      "accepted": true,
+      "changed_lines": 3,
+      "analysis": "S3 → S3-compatible object storage: client swap only (endpoint + keys from env).",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": "diffs/app_storage.py__module.diff"
+    },
+    {
+      "file": "app/queue.py",
+      "function": "module",
+      "kind": "config",
+      "attempt": 0,
+      "accepted": true,
+      "changed_lines": 3,
+      "analysis": "SQS client swapped for the queue adapter; every call maps 1:1, checked by code.",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": "diffs/app_queue.py__module.diff"
+    },
+    {
+      "file": "app/db.py",
+      "function": "module",
+      "kind": "config",
+      "attempt": 0,
+      "accepted": true,
+      "changed_lines": 4,
+      "analysis": "DynamoDB resource swapped for the kv adapter (Postgres).",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": "diffs/app_db.py__module.diff"
+    },
+    {
+      "file": "app/db.py",
+      "function": "put_order",
+      "kind": "config",
+      "attempt": 0,
+      "accepted": true,
+      "changed_lines": 0,
+      "analysis": "1:1 mapping, checked by code",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": null
+    },
+    {
+      "file": "app/db.py",
+      "function": "get_order",
+      "kind": "config",
+      "attempt": 0,
+      "accepted": true,
+      "changed_lines": 0,
+      "analysis": "1:1 mapping, checked by code",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": null
+    },
+    {
+      "file": "app/db.py",
+      "function": "set_status",
+      "kind": "config",
+      "attempt": 0,
+      "accepted": true,
+      "changed_lines": 0,
+      "analysis": "1:1 mapping, checked by code",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": null
+    },
+    {
+      "file": "app/queue.py",
+      "function": "publish_order_created",
+      "kind": "config",
+      "attempt": 0,
+      "accepted": true,
+      "changed_lines": 0,
+      "analysis": "1:1 mapping, checked by code",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": null
+    },
+    {
+      "file": "app/queue.py",
+      "function": "receive_one",
+      "kind": "config",
+      "attempt": 0,
+      "accepted": true,
+      "changed_lines": 0,
+      "analysis": "1:1 mapping, checked by code",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": null
+    },
+    {
+      "file": "app/queue.py",
+      "function": "ack",
+      "kind": "config",
+      "attempt": 0,
+      "accepted": true,
+      "changed_lines": 0,
+      "analysis": "1:1 mapping, checked by code",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": null
+    },
+    {
+      "file": "app/db.py",
+      "function": "list_orders_by_customer",
+      "kind": "ai",
+      "attempt": 0,
+      "accepted": true,
+      "changed_lines": 3,
+      "analysis": "Queries the customer_id GSI with a string KeyConditionExpression. The kv adapter only accepts Key(x).eq(v), so the expression and ExpressionAttributeValues become Key(\"customer_id\").eq(customer_id). Same index, same return shape.",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": "diffs/app_db.py__list_orders_by_customer.diff"
+    },
+    {
+      "file": "app/db.py",
+      "function": "_from_ddb",
+      "kind": "fix",
+      "attempt": 1,
+      "accepted": true,
+      "changed_lines": 2,
+      "analysis": "test_order_total_is_number failed: totals with cents were truncated to int after the move because Postgres NUMERIC comes back as Decimal('12.50'). Keep floats when the value isn't integral.",
+      "unsupported": [],
+      "rejected_reason": null,
+      "diff_path": "diffs/app_db.py___from_ddb.diff"
+    }
+  ],
+  "tests_unchanged": true,
+  "llm": "ollama · qwen2.5-coder:7b · local",
+  "roundtrip": "passed",
+  "roundtrip_checks": [
+    {
+      "name": "orders count",
+      "ok": true,
+      "detail": "26 on Leaseweb → 26 on AWS",
+      "duration_s": 0.0
+    },
+    {
+      "name": "receipts count",
+      "ok": true,
+      "detail": "25 → 25",
+      "duration_s": 0.0
+    },
+    {
+      "name": "new order exists on AWS",
+      "ok": true,
+      "detail": "order created on Leaseweb found after copy back",
+      "duration_s": 0.0
+    }
+  ],
+  "roundtrip_tests": {
+    "attempt": 1,
+    "platform": "aws",
+    "passed": 7,
+    "failed": 0,
+    "errors": 0,
+    "total": 7,
+    "duration_s": 4.2,
+    "failures": [],
+    "output_tail": ""
+  },
+  "fixtures_used": [
+    "ui-demo"
+  ]
+}

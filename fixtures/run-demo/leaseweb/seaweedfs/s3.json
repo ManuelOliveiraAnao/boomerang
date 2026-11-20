@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "shoplite",
+      "credentials": [
+        {
+          "accessKey": "<redacted-in-fixture>",
+          "secretKey": "<redacted-in-fixture>"
+        }
+      ],
+      "actions": ["Read:receipts", "Write:receipts", "List:receipts"]
+    }
+  ]
+}

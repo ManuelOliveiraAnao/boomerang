@@ -1,0 +1,11 @@
+--- a/app/db.py
++++ b/app/db.py
+@@ -1,7 +1,6 @@
+ def list_orders_by_customer(customer_id: str) -> list[dict]:
+     resp = _table().query(
+         IndexName="customer_id-index",
+-        KeyConditionExpression="customer_id = :c",
+-        ExpressionAttributeValues={":c": customer_id},
++        KeyConditionExpression=Key("customer_id").eq(customer_id),
+     )
+     return [_from_ddb(i) for i in resp.get("Items", [])]

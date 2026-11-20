@@ -57,6 +57,14 @@ def render() -> None:
         unsafe_allow_html=True,
     )
 
+    summ = src.summary
+    if src.is_demo:
+        st.warning("Demo data: this run was assembled from A's and B's real outputs plus illustrative "
+                   "pipeline results (fixtures/run-demo). It is replaced by a real run once C's "
+                   "pipeline lands.", icon="⚠️")
+    if summ.get("llm") and "cloud" in summ["llm"]:
+        st.info(f"This run used the cloud fallback model ({summ['llm']}), not a local model.")
+
     status = data.stage_status(src.events)
     if ss.approved:
         status["approve"] = "done"

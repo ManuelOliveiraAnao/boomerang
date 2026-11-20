@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ui.theme import LIGHT_COLORS
+from ui.theme import LIGHT_COLORS, logo_svg
 
 
 def _html(s: str) -> None:
@@ -35,8 +35,9 @@ def _section(kicker: str, title: str, lead: str) -> None:
 
 def render() -> None:
     # ---------------- hero ----------------
+    _html(f'<div class="lp-hero" style="padding-bottom:0"><span class="lp-mark">{logo_svg(72)}</span></div>')
     _html("""
-      <div class="lp-hero">
+      <div class="lp-hero" style="padding-top:0">
         <span class="bm-eyebrow"><b>InfraHack 2026</b>AI for sovereign cloud migration</span>
         <div class="bm-title">Leave AWS.<br>Prove it works. Come back.</div>
         <div class="bm-sub">
@@ -204,4 +205,4 @@ def render() -> None:
     """)
     st.write("")
     _go_dashboard("cta_bottom")
-    _html('<div class="lp-foot">Boomerang · InfraHack 2026 · Leaseweb × Velv · Apache-2.0</div>')
+    _html(f'<div class="lp-foot"><span style="display:inline-block;vertical-align:middle;margin-right:6px">{logo_svg(14)}</span>Boomerang · InfraHack 2026 · Leaseweb × Velv · Apache-2.0</div>')

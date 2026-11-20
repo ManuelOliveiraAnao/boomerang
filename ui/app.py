@@ -20,16 +20,17 @@ from ui import dashboard, landing, theme  # noqa: E402
 
 st.set_page_config(
     page_title="Boomerang",
-    page_icon="🪃",
+    page_icon=theme.FAVICON,
     layout="wide",
     initial_sidebar_state="expanded",
 )
 theme.inject_css()
+st.logo(str(theme.ASSETS / "logo.svg"), size="medium")
 
 with st.sidebar:
     st.markdown(theme.BRAND_HTML, unsafe_allow_html=True)
 
-home = st.Page(landing.render, title="Overview", url_path="overview", default=True)
+home = st.Page(landing.render, title="Overview", default=True)
 app = st.Page(dashboard.render, title="Dashboard", url_path="dashboard")
 st.session_state["_pages"] = {"home": home, "dashboard": app}
 

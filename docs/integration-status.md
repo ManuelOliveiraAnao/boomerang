@@ -8,11 +8,12 @@ Work continues on **`integration-abc`**. It holds A + B + C + D, merged in the o
 | A (`role-a-platform-plan`) | `fdf0b69` | none |
 | B (`member-b-after-c1`) | `51c6ff8` | 10 files: kept C+A for `__init__.py` ×2, `lab.py`, `provisioner_aws.py`, `verifier.py`, `datamover.py`, `test_stubs.py` (as both guides say), and C for `cli.py`, `pyproject.toml`, `tests/test_cli.py` (B had C2-era copies) |
 | D (`D`) | `2ce6d29` | `boomerang/cost.py`: kept D's (C had the stub) |
+| B again (`member-b-implementation`) | `6fc7db0` | B's rewrite of scanner/assess/lockin/lost/generator/kv (built on `role-c`). 20 files: **B's side** for all B files and fixtures; **ours** for C's tests (B's copy predates the A/D merges) and `.gitignore` (same `!**/*.j2` line). B's old tests `test_scanner.py`, `test_generator.py`, `test_exhaustive_member_b.py` were removed: they test the previous API (`assess(pam)` without `emit`, dict PAMs, `generate_secrets`, `WEIGHTS`, `scanner.ai.scan`) that the rewrite replaced; `tests/test_member_b.py` + `tests/sovereign_sdk/test_kv_member_b.py` are B's tests now. The ShopLite scanner fixes below were re-applied on top of the rewrite (additive, end of `scanner/static.py`). **Not merged on purpose:** the partial-migration work (A's guide `afad599` on `role-a-platform-plan`, and B's feature in progress). |
 
 Checked after merging: A's files are identical to `role-a-platform-plan`, C's to `role-c`, `cli_platform.py` did not
 come back, no stub is left anywhere (`tests/test_stubs.py::test_no_stub_is_left`).
 
-**Unit tests: `pytest` → 560 passed, 18 skipped** (the skips need Postgres / S3 credentials / Docker).
+**Unit tests: `pytest` → 451 passed, 23 skipped** (after B's rewrite; the skips need Postgres / S3 credentials / Docker).
 
 ## Changed in other roles' files (please review)
 

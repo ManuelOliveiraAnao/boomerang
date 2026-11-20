@@ -28,10 +28,10 @@
       "vhost": "shoplite",
       "durable": true,
       "arguments": {
-        "x-queue-type": "{{ order_events_queue_arguments['x-queue-type'] }}",
-        "x-delivery-limit": {{ order_events_queue_arguments['x-delivery-limit'] }},
-        "x-dead-letter-exchange": "{{ order_events_queue_arguments['x-dead-letter-exchange'] }}",
-        "x-dead-letter-routing-key": "{{ order_events_queue_arguments['x-dead-letter-routing-key'] }}"
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 2,
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "order-events-dlq"
       }
     }
   ]

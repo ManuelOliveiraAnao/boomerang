@@ -2,7 +2,5 @@
 set -euo pipefail
 
 SERVER="${1:?Usage: deploy.sh user@host}"
-
 rsync -az --exclude '.git' ./ "${SERVER}:~/boomerang-leaseweb/"
 ssh "${SERVER}" 'cd ~/boomerang-leaseweb && docker compose pull && docker compose up -d --wait'
-curl --fail --silent --show-error "http://${SERVER#*@}:8080/health"

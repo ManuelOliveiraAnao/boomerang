@@ -2,7 +2,7 @@
   "pam_version": "0.2",
   "app_name": "ShopLite",
   "platform": "aws",
-  "entrypoints": ["app.main:app"],
+  "entrypoints": ["app.main:app", "app.worker:main"],
   "test_command": "pytest -q tests",
   "components": [
     {
@@ -13,17 +13,11 @@
       "name_env_var": "ORDERS_TABLE",
       "partition_key": {"name": "order_id", "type": "S"},
       "sort_key": null,
-      "indexes": [
-        {
-          "name": "customer_id-index",
-          "partition_key": {"name": "customer_id", "type": "S"},
-          "sort_key": null
-        }
-      ],
+      "indexes": [{"name": "customer_id-index", "partition_key": {"name": "customer_id", "type": "S"}, "sort_key": null}],
       "fifo": false,
       "max_receive_count": null,
       "visibility_timeout_s": null,
-      "features": ["put", "get", "update", "delete", "query", "conditional_write", "gsi"],
+      "features": ["put", "get", "update", "delete", "query", "gsi", "conditional_write"],
       "usages": []
     },
     {
@@ -32,7 +26,7 @@
       "provider": "aws.s3",
       "resource_name": "receipts",
       "name_env_var": "RECEIPTS_BUCKET",
-      "features": ["put", "get"],
+      "features": ["put", "get", "list", "delete"],
       "usages": []
     },
     {
@@ -73,8 +67,5 @@
     }
   ],
   "files": [],
-  "env": [
-    {"name": "AWS_REGION", "value": "us-east-1", "purpose": "AWS region"},
-    {"name": "AWS_ENDPOINT_URL", "value": "http://127.0.0.1:4566", "purpose": "Moto endpoint"}
-  ]
+  "env": []
 }

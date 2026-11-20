@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from ui import motion
 from ui.theme import LIGHT_COLORS, logo_svg, wordmark_svg
 
 
@@ -84,6 +85,8 @@ def _section(kicker: str, title: str, lead: str) -> None:
 
 
 def render() -> None:
+    motion.inject()
+
     # ---------------- hero ----------------
     # Our own static markup + script (no user input), so running its JS is safe.
     # The SVG goes through st.markdown (st.html's sanitiser strips SVG); only the script uses st.html.

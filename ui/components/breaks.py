@@ -167,80 +167,80 @@ def render(src: Source) -> None:
             for row in reds:
                 _component_card(row)
 
-    # ---- approval gate ----
+    # ---- scope + approval gate (docs/16: choose what moves, then approve) ----
     st.divider()
+    _gate(src, rows, reds, assessment)
+
+
+def _approve_label(chosen: list[str], ids: list[str]) -> str:
+    if not chosen:
+        return "Select at least one service"
+    if set(chosen) >= set(ids):
+        return f"Approve and move all {len(ids)}"
+    return f"Approve and move {len(chosen)} of {len(ids)}"
+
+
+def _gate(src: Source, rows: list[dict], reds: list[dict], assessment: dict) -> None:
+    from ui import runner
+    from ui import scope as sc
+    from ui.components import scope as scope_ui
+
     ss = st.session_state
+    ids = [r["id"] for r in sc.movable(rows)]
     approval = src.json("approval")
     live_run = ss.get("live_run")
     is_live = src.kind == "run" and src.path is not None and src.path.name == live_run
-    if approval:
+
+    if src.kind == "fixtures":
+        # Demo data: the whole flow works as a preview in this browser session.
+        if ss.get("approved"):
+            chosen = scope_ui.choose(src, rows, reds, assessment, editable=False,
+                                     initial=sc.approved_scope(src, ids))
+            st.success(f"Plan approved at {ss.get('approved_at', '')}: {len(chosen)} of {len(ids)} services move; "
+                       f"{len(reds)} stay with a human. See Placement to move more, or bring one back.")
+            if st.button("Revoke approval"):
+                ss.approved = False
+                sc.reset_preview(src)
+                st.rerun()
+        else:
+            chosen = scope_ui.choose(src, rows, reds, assessment, editable=True)
+            st.caption("Nothing is written until you approve. AWS stays untouched until every check passes.")
+            if st.button(_approve_label(chosen, ids), type="primary", disabled=not chosen):
+                sc.approve_preview(src, chosen)
+                st.rerun()
+    elif approval:
+        chosen = scope_ui.choose(src, rows, reds, assessment, editable=False, initial=sc.approved_scope(src, ids))
         when = time.strftime("%H:%M:%S", time.localtime(approval.get("ts", 0)))
-        scope = approval.get("scope")
-        movable = [r["id"] for r in migrated if r["kind"] in MOVABLE]
-        moving = (f"Self-hosted: {', '.join(scope)}; stays on AWS: "
-                  f"{', '.join(c for c in movable if c not in scope) or 'nothing'}." if scope
-                  else f"{len(migrated)} components move; {len(reds)} stay with a human.")
         st.success(f"Plan approved by {approval.get('approved_by', '?')} at {when} "
-                   f"(plan hash {str(approval.get('plan_sha256', ''))[:12]}). {moving}")
+                   f"(plan hash {str(approval.get('plan_sha256', ''))[:12]}). Self-hosted: "
+                   f"{', '.join(chosen) or 'nothing'}; stays on AWS: "
+                   f"{', '.join(i for i in ids if i not in chosen) or 'nothing'}; {len(reds)} stay with a human.")
     elif is_live:
-        from ui import runner
         step = ss.get("step")
         busy = bool(step and not step.done)
         waiting = src.summary.get("status") == "awaiting_approval"
-        st.info(f"Nothing is written until you approve. {len(migrated)} components will move to "
-                f"Leaseweb; {len(reds)} are flagged for a human and AWS stays untouched.")
-        chosen, movable = _choose_scope(migrated, live_run, disabled=busy or not waiting)
-        hybrid = 0 < len(chosen) < len(movable)
-        label = f"Approve: move {len(chosen)} of {len(movable)}" if hybrid else "Approve plan and migrate"
-        if st.button(label, type="primary", disabled=busy or not waiting or not chosen):
-            ss.step = runner.start("approve", live_run, then=["execute"], components=chosen if hybrid else None)
+        chosen = scope_ui.choose(src, rows, reds, assessment, editable=waiting and not busy)
+        partial = bool(chosen) and set(chosen) != set(ids)
+        allowed = not partial or sc.supported()
+        st.caption("Nothing is written until you approve. AWS stays untouched until every check passes.")
+        if st.button(_approve_label(chosen, ids), type="primary",
+                     disabled=busy or not waiting or not chosen or not allowed):
+            ss.step = runner.start("approve", live_run, then=["execute"], components=chosen if partial else None)
             st.rerun()
+        if partial and not allowed:
+            st.caption("Moving only some services needs the engine's scope support (C: boomerang/scope.py). "
+                       "Select all of them to run the full migration now.")
         if not waiting and not busy:
             st.caption("The plan isn't waiting for approval (see the activity log above).")
-    elif src.kind == "run":
+    else:
         # A recorded run opened in Replay: approving here would only fake it in this
         # browser session, so the gate is read-only. Real approval is a CLI call.
+        scope_ui.choose(src, rows, reds, assessment, editable=False)
         run_id = src.path.name if src.path is not None else "<run_id>"
         status = src.summary.get("status")
         if status == "awaiting_approval":
-            st.info(f"This recorded run is waiting for approval: {len(migrated)} components would move; "
-                    f"{len(reds)} are flagged for a human. To go ahead, run `boomerang approve {run_id}` "
-                    f"then `boomerang execute {run_id}`, or start a new run in Live mode.")
+            st.info(f"This recorded run is waiting for approval. To go ahead, run `boomerang approve {run_id}` "
+                    f"(add `--only a,b` to move some services) then `boomerang execute {run_id}`, or start a new "
+                    "run in Live mode.")
         else:
             st.info(f"Recorded run without an approval record (status: {status or 'unknown'}).")
-    elif ss.get("approved"):
-        st.success(f"Plan approved at {ss.get('approved_at', '')}. "
-                   f"{len(migrated)} components will move; {len(reds)} stay with a human.")
-        if st.button("Revoke approval"):
-            ss.approved = False
-            st.rerun()
-    else:
-        st.info(f"Nothing is written until you approve. {len(migrated)} components will move to "
-                f"Leaseweb; {len(reds)} are flagged for a human and AWS stays untouched.")
-        if st.button("Approve plan", type="primary"):
-            ss.approved = True
-            ss.approved_at = time.strftime("%H:%M:%S")
-            st.rerun()
-
-
-MOVABLE = {"object_store", "kv_table", "queue"}      # docs/16: only these can be in a scope; 🔴 never
-
-
-def _choose_scope(migrated: list[dict], run_id: str, disabled: bool) -> tuple[list[str], list[str]]:
-    """Partial migration (docs/16): a checkbox per movable component, all checked by default."""
-    movable = [r for r in migrated if r["kind"] in MOVABLE]
-    if not movable:
-        return [], []
-    st.markdown("**Choose what moves.** Unchecked components stay on AWS (partial migration); "
-                "you can move them over or back later in *Data & round trip*.")
-    cols = st.columns(len(movable))
-    chosen = [r["id"] for r, col in zip(movable, cols)
-              if col.checkbox(r["id"], value=True, key=f"scope-{run_id}-{r['id']}", disabled=disabled)]
-    kept = [r["id"] for r in movable if r["id"] not in chosen]
-    if not chosen:
-        st.error("Choose at least one component to move.")
-    elif kept:
-        st.warning(f"🔴 Hybrid: the self-hosted app needs scoped AWS credentials for {', '.join(kept)} "
-                   "(they stay on AWS). Each component is consistent on its own; there are no transactions "
-                   "across the two sides.")
-    return chosen, [r["id"] for r in movable]

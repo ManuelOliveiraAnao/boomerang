@@ -13,7 +13,7 @@ from pathlib import Path
 import streamlit as st
 
 from ui.data import HIDDEN_FILES, Source, mask_secrets
-from ui.theme import LIGHT_COLORS, empty_state
+from ui.theme import LIGHT_COLORS, check_row, empty_state
 
 CHECK_LABEL = {"config": "Files valid", "boot": "Stack booted", "schema": "Database schema",
                "tests": "Original tests", "health": "Health check"}
@@ -59,13 +59,12 @@ def _checklist(summ: dict) -> None:
             st.markdown(f'<b>Attempt {i}</b> <span style="color:{color};font-size:0.8rem">'
                         f'{"● passed" if ok else "● failed"}</span>', unsafe_allow_html=True)
             for c in v["checks"]:
-                mark = "✅" if c["ok"] else "❌"
-                st.markdown(f'{mark} **{CHECK_LABEL.get(c["name"], c["name"])}** '
-                            f'<span class="bm-muted">· {c.get("detail", "")} · {c.get("duration_s", 0):.1f}s</span>',
+                st.markdown(check_row(c["ok"], CHECK_LABEL.get(c["name"], c["name"]),
+                                      f'· {c.get("detail", "")} · {c.get("duration_s", 0):.1f}s'),
                             unsafe_allow_html=True)
             t = v.get("tests") or {}
             for f in t.get("failures", []):
-                with st.expander(f"✗ {f['test'].split('::')[-1]}"):
+                with st.expander(f['test'].split('::')[-1], icon=":material/cancel:"):
                     st.code(f"{f['message']}\n\n{f['traceback']}", language="text")
 
 

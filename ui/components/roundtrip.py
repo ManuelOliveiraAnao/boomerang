@@ -11,14 +11,14 @@ import pandas as pd
 import streamlit as st
 
 from ui.data import Source
-from ui.theme import AWS_ORANGE, LEASEWEB_RED, LIGHT_COLORS, MUTED, empty_state
+from ui.theme import AWS_ORANGE, LEASEWEB_RED, LIGHT_COLORS, MUTED, check_row, empty_state
 
 
 def _tests(t: dict | None) -> str:
     if not t:
         return "tests not run"
     ok = t["total"] > 0 and t["failed"] == 0 and t["errors"] == 0
-    return f'{"✓" if ok else "✗"} tests {t["passed"]}/{t["total"]}'
+    return f'tests {t["passed"]}/{t["total"]} ' + ("passed" if ok else "· failing")
 
 
 def _counts(move: dict | None, side: str) -> str:
@@ -48,11 +48,14 @@ def _move_table(move: dict) -> None:
         rows.append({
             "Component": c["component_id"], "Kind": c["kind"],
             "Source": c["source_count"], "Target": c["target_count"],
-            "Counts": "✅" if same else "❌",
-            "Checksum": "✅" if chk else "–" if chk is None else "❌",
+            "Counts": "Match" if same else "Mismatch",
+            "Checksum": "Match" if chk else "–" if chk is None else "Mismatch",
             "Notes": "; ".join(c.get("notes", [])),
         })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    green, red = LIGHT_COLORS["green"], LIGHT_COLORS["red"]
+    tone = lambda v: f"color: {green}" if v == "Match" else f"color: {red}" if v == "Mismatch" else ""  # noqa: E731
+    df = pd.DataFrame(rows)
+    st.dataframe(df.style.map(tone, subset=["Counts", "Checksum"]), hide_index=True, width="stretch")
 
 
 def render(src: Source) -> None:
@@ -63,8 +66,6 @@ def render(src: Source) -> None:
         empty_state("No data moved yet", "After verification the data moves to Leaseweb with counts and "
                     "checksums; the round trip copies it back and reruns the original tests.")
         return
-
-    _scope_panel(src)
 
     # ---- round-trip strip ----
     verifs = s.get("verifications") or []
@@ -101,8 +102,7 @@ def render(src: Source) -> None:
     if checks:
         st.markdown("#### Round-trip checks")
         for c in checks:
-            st.markdown(f'{"✅" if c["ok"] else "❌"} **{c["name"]}** '
-                        f'<span class="bm-muted">· {html.escape(c.get("detail", ""))}</span>',
+            st.markdown(check_row(c["ok"], html.escape(c["name"]), f'· {html.escape(c.get("detail", ""))}'),
                         unsafe_allow_html=True)
 
     # ---- what got lost ----
@@ -123,50 +123,3 @@ def render(src: Source) -> None:
                                 f'<span class="bm-muted">· {html.escape(x["feature"])}</span><br>'
                                 f'<span class="bm-muted" style="font-size:0.82rem">{html.escape(x["detail"])}'
                                 f'</span></div>', unsafe_allow_html=True)
-
-
-MOVABLE = {"object_store", "kv_table", "queue"}
-
-
-def _scope_panel(src: Source) -> None:
-    """docs/16: where each movable component runs now, Move over / Move back on a live run, the step history."""
-    import time
-
-    pam = src.json("pam") or {}
-    movable = [c for c in pam.get("components", []) if c.get("kind") in MOVABLE]
-    s = src.summary
-    if not movable:
-        return
-    scope = (s.get("scope") or {}).get("selfhosted")
-    selfhosted = set(scope) if scope is not None else {c["id"] for c in movable}
-    ss = st.session_state
-    live = src.kind == "run" and src.path is not None and src.path.name == ss.get("live_run")
-    step = ss.get("step")
-    can_move = live and s.get("status") == "passed" and not (step and not step.done)
-
-    st.markdown("#### Where each component runs")
-    cols = st.columns(len(movable))
-    for c, col in zip(movable, cols):
-        here = c["id"] in selfhosted
-        with col, st.container(border=True):
-            st.markdown(f'<b>{html.escape(c["id"])}</b><br><span class="bm-muted">'
-                        f'{"self-hosted" if here else "AWS"}</span>', unsafe_allow_html=True)
-            if live:
-                from ui import runner
-                last = here and len(selfhosted) == 1          # moving the last one back = the round trip
-                if st.button("Move back" if here else "Move over", key=f"mv-{c['id']}",
-                             disabled=not can_move or last, width="stretch"):
-                    ss.step = runner.start("move-back" if here else "move-over", src.path.name,
-                                           components=[c["id"]])
-                    st.rerun()
-    if live and not can_move:
-        st.caption("Moving components needs a passed run whose stack is up (and no step running).")
-    for i, st_ in enumerate(s.get("steps") or [], 1):
-        when = time.strftime("%H:%M:%S", time.localtime(st_.get("at", 0)))
-        ok = {True: "✅", False: "❌"}.get(st_.get("verification_ok"), "–")
-        counts = "; ".join(f'{m["direction"]}: ' + ", ".join(f'{x["component_id"]} {x["target_count"]}'
-                                                            for x in m.get("counts", []))
-                           for m in st_.get("data_moves") or [])
-        st.markdown(f'{ok} **Step {i}** · {st_.get("action", "").replace("_", " ")} '
-                    f'{", ".join(st_.get("components", []))} <span class="bm-muted">· {when} · {html.escape(counts)}'
-                    f'</span>', unsafe_allow_html=True)

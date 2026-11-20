@@ -8,7 +8,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ui import iso_art, motion
-from ui.theme import LIGHT_COLORS, logo_svg, wordmark_svg
+from ui.theme import LIGHT_COLORS, logo_svg, status_icon, wordmark_svg
 
 
 def _html(s: str) -> None:
@@ -300,7 +300,7 @@ def render() -> None:
         "A human approves the plan before anything is written.",
         "AWS stays untouched until the checks pass.",
     ]
-    _html('<ul class="lp-list">' + "".join(f"<li><i>✓</i>{t}</li>" for t in trust) + "</ul>")
+    _html('<ul class="lp-list">' + "".join(f"<li><i>{status_icon(True)}</i>{t}</li>" for t in trust) + "</ul>")
 
     # ---------------- costs ----------------
     _section(
@@ -334,7 +334,7 @@ def render() -> None:
              "Full compatibility: reds stay with a human.",
              "Migrates any app: today, DynamoDB, SQS and S3 in Python apps.",
              "Always cheaper: the numbers decide, sometimes AWS wins."]
-    _html('<ul class="lp-list never">' + "".join(f"<li><i>✕</i>{t}</li>" for t in never) + "</ul>")
+    _html('<ul class="lp-list never">' + "".join(f"<li><i>{status_icon(False)}</i>{t}</li>" for t in never) + "</ul>")
 
     # ---------------- CTA ----------------
     _html("""

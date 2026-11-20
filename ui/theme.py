@@ -290,8 +290,8 @@ _LANDING_CSS = f"""
   .lp-list {{ list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }}
   .lp-list li {{ display: flex; gap: 10px; align-items: flex-start; color: {TEXT_2}; font-size: 0.92rem; line-height: 1.5;
     background: {BG_1}; border: 1px solid {BORDER}; border-radius: 12px; padding: 14px 16px; }}
-  .lp-list li i {{ font-style: normal; color: {LIGHT_COLORS["green"]}; }}
-  .lp-list.never li i {{ color: {LIGHT_COLORS["red"]}; }}
+  .lp-list li i {{ font-style: normal; display: inline-flex; margin-top: 1px; }}
+  .lp-list li i .bm-st {{ margin-right: 0; }}
 
   .lp-chips {{ display: flex; flex-wrap: wrap; gap: 8px; }}
   .lp-chip {{ border: 1px solid {BORDER}; background: {BG_1}; color: {TEXT_2}; border-radius: 999px; padding: 4px 12px; font-size: 0.82rem; }}
@@ -387,6 +387,55 @@ _LANDING_CSS = f"""
 def inject_css() -> None:
     st.markdown(_LANDING_CSS, unsafe_allow_html=True)
     st.markdown(_CSS, unsafe_allow_html=True)
+    st.markdown(ICON_CSS, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------- icons
+# One small stroke icon set (24px grid, 2px round strokes) instead of emoji, so status marks
+# look the same on every OS and match the rest of the UI. Inline SVG: use in HTML strings.
+_ICON_PATHS = {
+    "check": '<path d="M5 12.5l4.2 4.2L19 7"/>',
+    "x": '<path d="M7 7l10 10M17 7L7 17"/>',
+    "minus": '<path d="M7 12h10"/>',
+    "alert": '<path d="M12 8v5"/><path d="M12 16.5v.01"/>',
+}
+
+
+def icon(name: str, color: str = "currentColor", size: int = 14, stroke: float = 2.2) -> str:
+    """A bare stroke icon (check, x, minus, alert)."""
+    return (f'<svg class="bm-ic" width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="{color}" '
+            f'stroke-width="{stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            f'{_ICON_PATHS[name]}</svg>')
+
+
+def status_icon(ok: bool | None, size: int = 18) -> str:
+    """Check in a soft green disc, cross in red, dash in grey when not checked (ok is None)."""
+    name, color = {True: ("check", LIGHT_COLORS["green"]), False: ("x", LIGHT_COLORS["red"]),
+                   None: ("minus", FAINT)}[ok]
+    label = {True: "passed", False: "failed", None: "not checked"}[ok]
+    return (f'<span class="bm-st" role="img" aria-label="{label}" style="--c:{color};width:{size}px;height:{size}px">'
+            f'{icon(name, color, round(size * 0.62), 2.6)}</span>')
+
+
+ICON_CSS = f"""
+<style>
+  .bm-ic {{ display: inline-block; vertical-align: -2px; flex: 0 0 auto; }}
+  .bm-st {{ display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border-radius: 50%;
+    vertical-align: -4px; background: color-mix(in srgb, var(--c) 14%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 38%, transparent); margin-right: 8px; }}
+  .bm-st .bm-ic {{ vertical-align: 0; }}
+  .bm-check {{ display: flex; align-items: flex-start; gap: 0; margin: 6px 0; color: {TEXT_2}; font-size: 0.9rem;
+    line-height: 1.45; }}
+  .bm-check .bm-st {{ margin-top: 1px; }}
+  .bm-check b {{ color: {TEXT}; font-weight: 500; margin-right: 6px; white-space: nowrap; }}
+</style>
+"""
+
+
+def check_row(ok: bool | None, title: str, detail: str = "") -> str:
+    """One status line: icon, bold title, muted detail (all escaped by the caller if needed)."""
+    return (f'<div class="bm-check">{status_icon(ok)}<b>{title}</b>'
+            f'<span class="bm-muted">{detail}</span></div>')
 
 
 def badge(text: str, kind: str = "") -> str:

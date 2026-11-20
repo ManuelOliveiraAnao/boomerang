@@ -66,7 +66,8 @@ class _Book:
         return float(self.by_id.get(price_id, {}).get("free_quantity") or 0)
 
     def add(self, side: str, item: str, price_id: str | None, quantity: float, unit: str,
-            *, eur: float | None = None, note: str = "", kind: str = "monthly") -> None:
+            *, eur: float | None = None, note: str = "", kind: str = "monthly",
+            component: str = "compute") -> None:
         """Add a line. With price_id, cost = quantity × unit price; with eur, a fixed amount."""
         p = self.by_id.get(price_id or "", {})
         if price_id is not None:
@@ -81,6 +82,9 @@ class _Book:
             "source": p.get("source", ""), "retrieved": str(p.get("retrieved", "")),
             "note": note,
             "category": "ops" if price_id is None and unit == "hours" else "infra",
+            # What the line pays for: a movable kind (kv_table / queue / object_store) or a
+            # shared part (compute, disk, egress, ops, migration). Used for partial migrations.
+            "component": component,
         })
 
 
@@ -122,24 +126,27 @@ def compute(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = Non
     reads = orders * float(u.get("reads_per_order", 0))
     writes = orders * float(u.get("writes_per_order", 0))
     b.add("aws", "DynamoDB reads", "aws.dynamodb.read_million", reads / 1e6, "million RRU",
-          note="1 read request unit per read (on-demand)")
+          note="1 read request unit per read (on-demand)", component="kv_table")
     b.add("aws", "DynamoDB writes", "aws.dynamodb.write_million", writes / 1e6, "million WRU",
-          note="1 write request unit per write (on-demand)")
+          note="1 write request unit per write (on-demand)", component="kv_table")
     db_gb = float(u.get("stored_gb_db", 0))
     db_free = b.free("aws.dynamodb.gb_month")
     b.add("aws", "DynamoDB storage", "aws.dynamodb.gb_month", max(0.0, db_gb - db_free), "GB-month",
-          note=f"{db_gb:g} GB stored, first {db_free:g} GB free")
+          note=f"{db_gb:g} GB stored, first {db_free:g} GB free", component="kv_table")
 
     sqs_req = orders * float(u.get("messages_per_order", 0)) * 3
     sqs_free = b.free("aws.sqs.million")
     b.add("aws", "SQS requests", "aws.sqs.million", max(0.0, sqs_req / 1e6 - sqs_free), "million requests",
-          note=f"send + receive + delete = 3 requests per message; first {sqs_free:g}M free")
+          note=f"send + receive + delete = 3 requests per message; first {sqs_free:g}M free",
+          component="queue")
 
     obj_gb = float(u.get("stored_gb_objects", 0))
-    b.add("aws", "S3 storage", "aws.s3.gb_month", obj_gb, "GB-month")
+    b.add("aws", "S3 storage", "aws.s3.gb_month", obj_gb, "GB-month", component="object_store")
     puts = orders * float(u.get("receipts_per_order", 1))
-    b.add("aws", "S3 PUT requests", "aws.s3.put_thousand", puts / 1000, "thousand requests")
-    b.add("aws", "S3 GET requests", "aws.s3.get_thousand", reads / 1000, "thousand requests")
+    b.add("aws", "S3 PUT requests", "aws.s3.put_thousand", puts / 1000, "thousand requests",
+          component="object_store")
+    b.add("aws", "S3 GET requests", "aws.s3.get_thousand", reads / 1000, "thousand requests",
+          component="object_store")
 
     tasks = u.get("aws_compute") or []
     vcpu = sum(float(t.get("vcpu", 0)) for t in tasks)
@@ -153,118 +160,59 @@ def compute(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = Non
     egress = float(u.get("egress_gb_month", 0))
     aws_free = b.free("aws.egress.gb")
     b.add("aws", "Internet egress", "aws.egress.gb", max(0.0, egress - aws_free), "GB",
-          note=f"{egress:g} GB out, first {aws_free:g} GB free")
+          note=f"{egress:g} GB out, first {aws_free:g} GB free", component="egress")
 
     aws_ops = float(o.get("aws_ops_hours", 0))
     b.add("aws", "Ops time (managed services)", None, aws_ops, "hours", eur=aws_ops * rate,
-          note=f"{aws_ops:g} h × €{rate:g}/h (assumption, ops.yaml)")
+          note=f"{aws_ops:g} h × €{rate:g}/h (assumption, ops.yaml)", component="ops")
 
     # ------------------------------------------------ Leaseweb (monthly)
     inst = u.get("lw_instance", "lw.instance.m3_large")
     b.add("leaseweb", "Server (api, worker, Postgres, RabbitMQ)", inst, 1, "month",
           note=b.by_id.get(inst, {}).get("item", ""))
     disk = float(u.get("lw_disk_gb", 0))
-    b.add("leaseweb", "Network SSD (database + queue data)", "lw.block_storage.gb_month", disk, "GB-month")
+    b.add("leaseweb", "Network SSD (database + queue data)", "lw.block_storage.gb_month", disk, "GB-month",
+          component="disk")
 
     backup_gb = float(o.get("backup_storage_gb", 0))
     if u.get("lw_objects_on", "object_storage") == "instance_disk":
-        b.add("leaseweb", "Objects on server disk (SeaweedFS)", "lw.block_storage.gb_month", obj_gb, "GB-month")
-        b.add("leaseweb", "Backups (Object Storage)", "lw.object_storage.gb_month", backup_gb, "GB-month")
+        b.add("leaseweb", "Objects on server disk (SeaweedFS)", "lw.block_storage.gb_month", obj_gb, "GB-month",
+              component="object_store")
     else:
-        b.add("leaseweb", "Object Storage (objects + backups)", "lw.object_storage.gb_month",
-              obj_gb + backup_gb, "GB-month", note=f"{obj_gb:g} GB objects + {backup_gb:g} GB backups")
+        b.add("leaseweb", "Object Storage (objects)", "lw.object_storage.gb_month", obj_gb, "GB-month",
+              component="object_store")
         b.add("leaseweb", "Object Storage PUT requests", "lw.object_storage.put_thousand", puts / 1000,
-              "thousand requests")
+              "thousand requests", component="object_store")
         b.add("leaseweb", "Object Storage GET requests", "lw.object_storage.get_thousand", reads / 1000,
-              "thousand requests")
+              "thousand requests", component="object_store")
+    # Database backups live in object storage either way.
+    b.add("leaseweb", "Backups (Object Storage)", "lw.object_storage.gb_month", backup_gb, "GB-month",
+          note="database backups", component="kv_table")
 
     lw_free = b.free("lw.egress.gb")
     b.add("leaseweb", "Internet egress", "lw.egress.gb", max(0.0, egress - lw_free), "GB",
-          note=f"{egress:g} GB out, first {lw_free:g} GB free (pooled)")
+          note=f"{egress:g} GB out, first {lw_free:g} GB free (pooled)", component="egress")
 
     for task, h in (o.get("hours_per_month") or {}).items():
         h = float(h)
         b.add("leaseweb", f"Ops: {task.replace('_', ' ')}", None, h, "hours", eur=h * rate,
-              note=f"{h:g} h × €{rate:g}/h (assumption, ops.yaml)")
+              note=f"{h:g} h × €{rate:g}/h (assumption, ops.yaml)",
+              component="kv_table" if task.startswith("backups") else "ops")
     mon = float(o.get("monitoring_tool_month_eur", 0))
     if mon:
-        b.add("leaseweb", "Monitoring tool", None, 1, "month", eur=mon, note="ops.yaml")
-
-    # ------------------------------------------------ Hybrid (monthly, docs/16 §3.4)
-    if hybrid_kinds is not None:
-        # Self-hosted server always runs api + worker + moved services
-        b.add("hybrid", "Server (self-hosted app + moved services)", inst, 1, "month",
-              note=b.by_id.get(inst, {}).get("item", ""))
-        if "kv_table" in hybrid_kinds or "queue" in hybrid_kinds:
-            b.add("hybrid", "Network SSD (self-hosted database / queue data)", "lw.block_storage.gb_month",
-                  disk, "GB-month")
-        if "kv_table" in hybrid_kinds:
-            b.add("hybrid", "Backups (Object Storage)", "lw.object_storage.gb_month", backup_gb, "GB-month")
-        else:
-            b.add("hybrid", "DynamoDB reads (kept on AWS)", "aws.dynamodb.read_million", reads / 1e6, "million RRU",
-                  note="1 read request unit per read (on-demand)")
-            b.add("hybrid", "DynamoDB writes (kept on AWS)", "aws.dynamodb.write_million", writes / 1e6, "million WRU",
-                  note="1 write request unit per write (on-demand)")
-            b.add("hybrid", "DynamoDB storage (kept on AWS)", "aws.dynamodb.gb_month", max(0.0, db_gb - db_free),
-                  "GB-month", note=f"{db_gb:g} GB stored, first {db_free:g} GB free")
-
-        if "queue" not in hybrid_kinds:
-            b.add("hybrid", "SQS requests (kept on AWS)", "aws.sqs.million", max(0.0, sqs_req / 1e6 - sqs_free),
-                  "million requests", note=f"send + receive + delete = 3 requests per message; first {sqs_free:g}M free")
-
-        if "object_store" in hybrid_kinds:
-            if u.get("lw_objects_on", "object_storage") == "instance_disk":
-                b.add("hybrid", "Objects on server disk (SeaweedFS)", "lw.block_storage.gb_month", obj_gb, "GB-month")
-            else:
-                b.add("hybrid", "Object Storage (objects)", "lw.object_storage.gb_month",
-                      obj_gb, "GB-month", note=f"{obj_gb:g} GB objects")
-                b.add("hybrid", "Object Storage PUT requests", "lw.object_storage.put_thousand", puts / 1000,
-                      "thousand requests")
-                b.add("hybrid", "Object Storage GET requests", "lw.object_storage.get_thousand", reads / 1000,
-                      "thousand requests")
-        else:
-            b.add("hybrid", "S3 storage (kept on AWS)", "aws.s3.gb_month", obj_gb, "GB-month")
-            b.add("hybrid", "S3 PUT requests (kept on AWS)", "aws.s3.put_thousand", puts / 1000, "thousand requests")
-            b.add("hybrid", "S3 GET requests (kept on AWS)", "aws.s3.get_thousand", reads / 1000, "thousand requests")
-
-        # Ongoing egress: self-hosted traffic + cross-cloud traffic between AWS and self-hosted servers
-        # (not free under the EU Data Act, which only covers one-off switching)
-        receipt_kb = float(u.get("receipt_kb", 2))
-        cross_gb = 0.0
-        if "kv_table" not in hybrid_kinds:
-            cross_gb += (reads + writes) * receipt_kb / (1024 * 1024)
-        if "object_store" not in hybrid_kinds:
-            cross_gb += reads * receipt_kb / (1024 * 1024)
-        if "queue" not in hybrid_kinds:
-            cross_gb += (orders * float(u.get("messages_per_order", 0))) * 1.0 / (1024 * 1024)
-        hybrid_aws_egress = float(u.get("hybrid_aws_egress_gb_month", max(cross_gb, egress)))
-        b.add("hybrid", "Ongoing AWS → self-hosted egress", "aws.egress.gb",
-              max(0.0, hybrid_aws_egress - aws_free), "GB",
-              note=f"{hybrid_aws_egress:g} GB/month out of AWS (not covered by EU Data Act switching rules; "
-                   f"first {aws_free:g} GB free)")
-        b.add("hybrid", "Self-hosted internet egress", "lw.egress.gb", max(0.0, egress - lw_free), "GB",
-              note=f"{egress:g} GB out, first {lw_free:g} GB free (pooled)")
-
-        # Ops hours for the self-hosted part + AWS ops hours for the kept AWS part
-        for task, h in (o.get("hours_per_month") or {}).items():
-            h = float(h)
-            b.add("hybrid", f"Ops: {task.replace('_', ' ')}", None, h, "hours", eur=h * rate,
-                  note=f"{h:g} h × €{rate:g}/h (self-hosted part)")
-        if aws_ops:
-            b.add("hybrid", "Ops time (kept AWS services)", None, aws_ops, "hours", eur=aws_ops * rate,
-                  note=f"{aws_ops:g} h × €{rate:g}/h (kept AWS part)")
-        if mon:
-            b.add("hybrid", "Monitoring tool", None, 1, "month", eur=mon, note="ops.yaml")
+        b.add("leaseweb", "Monitoring tool", None, 1, "month", eur=mon, note="ops.yaml", component="ops")
 
     # ------------------------------------------------ one-off migration egress
     switch_free = _to_date(o.get("eu_data_act_switching_free_from", "2027-01-12"))
     mig_gb = float(u.get("migration_data_gb", 0))
     if today >= switch_free:
         b.add("aws", "Migration egress (one-off)", None, mig_gb, "GB", eur=0.0, kind="one_off",
-              note=f"€0: EU Data Act bans switching charges incl. egress from {switch_free.isoformat()}")
+              note=f"€0: EU Data Act bans switching charges incl. egress from {switch_free.isoformat()}",
+              component="migration")
     else:
         b.add("aws", "Migration egress (one-off)", "aws.egress.gb", mig_gb, "GB", kind="one_off",
-              note=f"Charged before {switch_free.isoformat()}; €0 from then under the EU Data Act")
+              note=f"Charged before {switch_free.isoformat()}; €0 from then under the EU Data Act",
+              component="migration")
 
     # ------------------------------------------------ totals
     def total(side: str, kind: str = "monthly", category: str | None = None) -> float | None:
@@ -275,8 +223,18 @@ def compute(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = Non
         return round(sum(ln["cost_eur"] for ln in sel), 2)
 
     aws_m, lw_m = total("aws"), total("leaseweb")
-    hyb_m = total("hybrid") if hybrid_kinds is not None else None
     one_off = total("aws", "one_off")
+
+    # Hybrid column (docs/16 §3.4): the same lines scenario() prices, so the CLI (`cost --only`) and
+    # the UI's placement comparison always agree. Lines kept on AWS are labelled as such.
+    hyb_m = hyb_infra = None
+    if hybrid_kinds is not None:
+        sc = scenario(prices, usage, ops, hybrid_kinds, today=today)
+        for ln in sc["lines"]:
+            kept = ln["side"] == "aws" and ln["component"] in MOVABLE
+            b.lines.append({**ln, "side": "hybrid", "item": ln["item"] + (" (kept on AWS)" if kept else "")})
+        b.missing |= set(sc["missing"])
+        hyb_m, hyb_infra = sc["total"], sc["infra"]
     if b.missing or aws_m is None or lw_m is None or (hybrid_kinds is not None and hyb_m is None):
         totals = None
         break_even = cheaper = None
@@ -286,7 +244,7 @@ def compute(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = Non
                   "leaseweb_infra": total("leaseweb", category="infra")}
         if hyb_m is not None:
             totals["hybrid"] = hyb_m
-            totals["hybrid_infra"] = total("hybrid", category="infra")
+            totals["hybrid_infra"] = hyb_infra
         cheaper = "leaseweb" if lw_m < aws_m else "aws" if aws_m < lw_m else "equal"
         saving = aws_m - lw_m
         if one_off is None or saving <= 0:
@@ -305,6 +263,141 @@ def compute(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = Non
         "region": prices.get("region", {}),
         "as_of": today.isoformat(),
     }
+
+
+# ---------------------------------------------------------------- partial migrations
+# docs/16 §3.4: a placement runs some movable components self-hosted and keeps the rest on
+# AWS. The app (api + worker) runs on the self-hosted server as soon as anything moves.
+MOVABLE = ("kv_table", "queue", "object_store")
+_DATA_GB = {"kv_table": "stored_gb_db", "object_store": "stored_gb_objects"}   # what a move copies once
+_ITEM_KB = {"kv_table": 1.0, "queue": 1.0}                                     # assumed bytes per read / message
+
+
+def hybrid_traffic_gb(usage: dict, kept: set[str]) -> float:
+    """GB / month the self-hosted app pulls from the AWS services it still uses.
+
+    An estimate from usage: every read of a kept table or bucket and every kept queue message
+    leaves AWS once. Bucket reads use `receipt_kb`; the rest assume ~1 KB."""
+    orders = float(usage.get("orders_per_month", 0))
+    reads = orders * float(usage.get("reads_per_order", 0))
+    kb = 0.0
+    if "kv_table" in kept:
+        kb += reads * float(usage.get("item_kb", _ITEM_KB["kv_table"]))
+    if "object_store" in kept:
+        kb += reads * float(usage.get("receipt_kb", 2))
+    if "queue" in kept:
+        kb += orders * float(usage.get("messages_per_order", 0)) * float(usage.get("message_kb", _ITEM_KB["queue"]))
+    return kb / 1e6
+
+
+def scenario(prices: dict, usage: dict, ops: dict, moved, *, today: dt.date | None = None,
+             traffic_gb: float | None = None) -> dict:
+    """Monthly cost of one placement: `moved` = the movable kinds that run self-hosted.
+
+    Nothing moved = all on AWS; everything moved = all self-hosted (the same lines as
+    compute()). In between, a hybrid: AWS keeps the services of the kept kinds and their
+    share of the managed-service ops time; the self-hosted side runs the app, the moved
+    services and their ops; and the traffic the app pulls back from AWS is charged as AWS
+    egress (the EU Data Act only frees switching, not ongoing traffic).
+    """
+    today = today or dt.date.today()
+    moved = {k for k in moved if k in MOVABLE}
+    kept = set(MOVABLE) - moved
+    r = compute(prices, usage, ops, today=today)
+    monthly = [ln for ln in r["lines"] if ln["kind"] == "monthly"]
+    aws = [ln for ln in monthly if ln["side"] == "aws"]
+    lw = [ln for ln in monthly if ln["side"] == "leaseweb"]
+    b = _Book(prices)
+
+    if not moved:
+        mode, lines = "aws", list(aws)
+    elif not kept:
+        mode, lines = "selfhosted", list(lw)
+    else:
+        mode, lines = "hybrid", []
+        share = len(kept) / len(MOVABLE)
+        for ln in aws:
+            if ln["component"] in kept:
+                lines.append(ln)
+            elif ln["component"] == "ops":
+                lines.append({**ln, "quantity": ln["quantity"] * share,
+                              "cost_eur": None if ln["cost_eur"] is None else ln["cost_eur"] * share,
+                              "item": "Ops time (managed services kept)",
+                              "note": f"{share:.0%} of the AWS ops hours: {len(kept)} of {len(MOVABLE)} services stay"})
+        needs_disk = bool(moved & {"kv_table", "queue"})
+        for ln in lw:
+            c = ln["component"]
+            if c in ("compute", "egress", "ops") or c in moved or (c == "disk" and needs_disk):
+                lines.append(ln)
+        gb = hybrid_traffic_gb(usage, kept) if traffic_gb is None else float(traffic_gb)
+        free = b.free("aws.egress.gb")
+        b.add("aws", "Ongoing AWS → self-hosted egress", "aws.egress.gb", max(0.0, gb - free), "GB",
+              note=f"~{gb:,.2f} GB / month the app reads from the AWS services it still uses (not covered "
+                   f"by the EU Data Act switching rules); first {free:g} GB free", component="egress")
+        lines += b.lines
+
+    # One-off: only the data of what moves leaves AWS.
+    switch_free = _to_date(ops.get("eu_data_act_switching_free_from", "2027-01-12"))
+    mig_gb = sum(float(usage.get(_DATA_GB[k], 0)) for k in moved if k in _DATA_GB)
+    if not moved:
+        one_off = 0.0
+    elif today >= switch_free:
+        one_off = 0.0
+    else:
+        unit = b.eur_unit_price("aws.egress.gb")
+        one_off = None if unit is None else round(mig_gb * unit, 2)
+
+    missing = sorted(set(r["missing"]) | b.missing)
+
+    def _sum(sel):
+        return None if missing or any(ln["cost_eur"] is None for ln in sel) else round(sum(ln["cost_eur"] for ln in sel), 2)
+
+    return {
+        "mode": mode, "moved": sorted(moved), "kept": sorted(kept), "lines": lines,
+        "total": _sum(lines),
+        "infra": _sum([ln for ln in lines if ln["category"] == "infra"]),
+        "ops": _sum([ln for ln in lines if ln["category"] == "ops"]),
+        "aws": _sum([ln for ln in lines if ln["side"] == "aws"]),
+        "selfhosted": _sum([ln for ln in lines if ln["side"] == "leaseweb"]),
+        "one_off": one_off, "migration_gb": mig_gb, "missing": missing,
+    }
+
+
+def compare(prices: dict, usage: dict, ops: dict, moved, *, today: dt.date | None = None) -> dict:
+    """The three placements side by side: all on AWS, the chosen one, all self-hosted."""
+    return {
+        "aws": scenario(prices, usage, ops, (), today=today),
+        "chosen": scenario(prices, usage, ops, moved, today=today),
+        "selfhosted": scenario(prices, usage, ops, MOVABLE, today=today),
+    }
+
+
+def per_component(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = None) -> dict:
+    """Monthly cost of each movable kind on each side, plus the shared base (app, egress, ops).
+
+    The shared base is what each side costs to exist at all: on AWS, Fargate + egress + ops;
+    self-hosted, the server, its disk, egress and ops. Moving a single service brings the
+    whole self-hosted base with it, which is why moving one small service rarely pays."""
+    r = compute(prices, usage, ops, today=today)
+    monthly = [ln for ln in r["lines"] if ln["kind"] == "monthly"]
+
+    def total(side: str, comps) -> float | None:
+        sel = [ln for ln in monthly if ln["side"] == side and ln["component"] in comps]
+        return None if any(ln["cost_eur"] is None for ln in sel) else round(sum(ln["cost_eur"] for ln in sel), 2)
+
+    rows = {k: {"aws": total("aws", (k,)), "selfhosted": total("leaseweb", (k,))} for k in MOVABLE}
+    shared = {"aws": total("aws", ("compute", "egress", "ops")),
+              "selfhosted": total("leaseweb", ("compute", "disk", "egress", "ops"))}
+    return {"components": rows, "shared": shared, "missing": r["missing"]}
+
+
+def scale_usage(usage: dict, factor: float) -> dict:
+    """Usage with traffic and data multiplied by `factor` (the UI's scale slider)."""
+    u = dict(usage)
+    for key in ("orders_per_month", "stored_gb_db", "stored_gb_objects", "egress_gb_month", "migration_data_gb"):
+        if key in u:
+            u[key] = float(u[key]) * factor
+    return u
 
 
 CostReport = dict  # C1's stub names the return type CostReport; it's the dict compute() returns.

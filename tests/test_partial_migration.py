@@ -290,3 +290,174 @@ def load_and_notify(order_id):
     assert 'sqs.send_message(QueueUrl="http://sqs/q", MessageBody=order_id)' in text
     assert "ConsistentRead" not in text
 
+
+# ---------- exhaustive scope matrix on real ShopLite (docs/16 §3, §4, §5) ----------
+
+SHOPLITE = Path(__file__).resolve().parents[1] / "sample-app" / "aws"
+ALL_SUBSETS = [
+    ["orders"],
+    ["receipts"],
+    ["order_events"],
+    ["orders", "receipts"],
+    ["orders", "order_events"],
+    ["receipts", "order_events"],
+    ["orders", "receipts", "order_events"],
+]
+
+
+@pytest.mark.parametrize("subset", ALL_SUBSETS, ids=["-".join(s) for s in ALL_SUBSETS])
+def test_exhaustive_shoplite_scope_matrix_generator_assess_lockin_lost_and_cost(subset, monkeypatch):
+    import yaml
+
+    from boomerang import assess as assess_mod
+    from boomerang import cost as cost_mod
+    from boomerang import lockin as lockin_mod
+    from boomerang import lost as lost_mod
+    from boomerang import scope as scope_mod
+    from boomerang.generators import leaseweb as leaseweb_gen
+    from boomerang.scanner.static import scan_static
+
+    monkeypatch.setattr("boomerang.llm.structured", lambda **kw: kw["schema"](
+        findings=[], overall="red", summary="AI summary"))
+
+    pam = scan_static(SHOPLITE)
+    is_full = set(subset) == {"orders", "receipts", "order_events"}
+    is_hybrid = not is_full
+
+    # 1. scope helpers
+    norm = scope_mod.normalize_scope(pam, subset)
+    assert set(norm.selfhosted) == set(subset)
+    assert scope_mod.is_hybrid(pam, subset) == is_hybrid
+    kept_ids = {c.id for c in scope_mod.kept(pam, subset)}
+    assert kept_ids == ({"orders", "receipts", "order_events"} - set(subset))
+
+    # 2. assessment
+    assessment = assess_mod.assess(pam, Emitter("matrix"), subset)
+    hybrid_findings = [f for f in assessment.findings if f.component_id == "hybrid"]
+    assert (len(hybrid_findings) == 1) == is_hybrid
+    if is_hybrid:
+        assert hybrid_findings[0].light == "red"
+        for k in kept_ids:
+            assert k in hybrid_findings[0].what_changes
+
+    # 3. lock-in score decreases strictly as more components move
+    score_before = lockin_mod.score(pam, [])
+    score_after = lockin_mod.score(pam, subset)
+    assert 0 < score_after < score_before
+
+    # 4. generator files & YAML/JSON validity
+    files = {f.path: f.content for f in leaseweb_gen.render(pam, leaseweb_gen.make_secrets(pam), subset)}
+    assert ("schema.sql" in files) == ("orders" in subset)
+    assert ("rabbitmq/definitions.json" in files) == ("order_events" in subset)
+    assert ("seaweedfs/s3.json" in files) == ("receipts" in subset)
+    compose = yaml.safe_load(files["docker-compose.yml"])
+    services = set(compose["services"])
+    assert {"api", "worker"} <= services
+    assert ("postgres" in services) == ("orders" in subset)
+    assert ("backup" in services) == ("orders" in subset)
+    assert ("rabbitmq" in services) == ("order_events" in subset)
+    assert ("seaweedfs" in services) == ("receipts" in subset)
+    if is_hybrid:
+        assert "AWS_ENDPOINT_URL=http://127.0.0.1:4566" in files["laptop.env"]
+        assert compose["services"]["api"]["environment"]["AWS_ENDPOINT_URL"] == "http://host.docker.internal:4566"
+    else:
+        assert "AWS_ENDPOINT_URL" not in files["laptop.env"]
+
+    # 5. lost report
+    lost_items = lost_mod.build(pam, assessment, [], subset)
+    by_comp = {item.component_id: item for item in lost_items if item.component_id in kept_ids}
+    for k in kept_ids:
+        assert by_comp[k].status == "preserved" and by_comp[k].detail == "Stays on AWS"
+
+    # 6. cost model
+    prices, usage, ops = cost_mod.load_pricing()
+    cost_rep = cost_mod.estimate(prices, usage, ops, scope=subset)
+    assert ("hybrid" in cost_rep["totals"]) == is_hybrid
+    if is_hybrid:
+        assert cost_rep["totals"]["hybrid"] > 0
+
+
+@pytest.mark.parametrize("subset", [
+    ["orders"],
+    ["receipts"],
+    ["order_events"],
+    ["orders", "receipts"],
+    ["orders", "order_events"],
+    ["receipts", "order_events"],
+], ids=["orders", "receipts", "order_events", "orders-receipts", "orders-events", "receipts-events"])
+def test_exhaustive_shoplite_delock_for_every_partial_scope(tmp_path, subset, fake_llm):
+    import shutil
+    from boomerang.scanner.static import scan_static
+    from tests.test_shoplite_integration import GET_ORDER, LIST_BY_CUSTOMER
+
+    fake_llm.responses.update({
+        "delock:app/db.py:get_order": FunctionRewrite(
+            analysis="ConsistentRead dropped", new_source=GET_ORDER),
+        "delock:app/db.py:list_orders_by_customer": FunctionRewrite(
+            analysis="Key().eq()", new_source=LIST_BY_CUSTOMER),
+    })
+    pam = scan_static(SHOPLITE)
+    app = tmp_path / "run" / "leaseweb" / "app"
+    shutil.copytree(SHOPLITE, app, ignore=shutil.ignore_patterns("infra", "__pycache__"))
+    lights = {"orders": "amber", "order_events": "amber", "receipts": "green"}
+    assessment = Assessment(overall="amber", summary="s", findings=[
+        Finding(analysis="a", component_id=c.id, feature="f", light=lights.get(c.id, "red"), what_changes="w")
+        for c in pam.components])
+    delock.delock_detailed(app, pam, assessment, Emitter("t"), tmp_path / "run" / "diffs", scope=subset)
+
+    db = (app / "app" / "db.py").read_text(encoding="utf-8")
+    queue = (app / "app" / "queue.py").read_text(encoding="utf-8")
+    storage = (app / "app" / "storage.py").read_text(encoding="utf-8")
+    for rel, text in (("app/db.py", db), ("app/queue.py", queue), ("app/storage.py", storage)):
+        rules.check_module(text, rel)
+
+    assert ("kv.resource()" in db) == ("orders" in subset)
+    assert ('boto3.resource("dynamodb")' in db) == ("orders" not in subset)
+    assert ("queue.client()" in queue) == ("order_events" in subset)
+    assert ('boto3.client("sqs")' in queue) == ("order_events" not in subset)
+    assert ("storage.s3_client()" in storage) == ("receipts" in subset)
+    assert ('boto3.client("s3")' in storage) == ("receipts" not in subset)
+    assert (len(fake_llm.calls) == 2) == ("orders" in subset)
+
+
+def test_demo_scenario_three_steps_and_roundtrip_end_to_end(trip, source, moves, llm):
+    """docs/16 §4 Demo scenario:
+    Step 1: move receipts + orders (hybrid: SQS stays on AWS)
+    Step 2: move_over order_events (full self-hosted)
+    Step 3: move_back orders (hybrid: orders back on DynamoDB, queue + receipts self-hosted)
+    Then roundtrip the remaining self-hosted components back to AWS.
+    """
+    # Step 1: receipts + orders
+    pipeline.plan(source, run_id="demo")
+    pipeline.approve("demo", scope=["receipts", "orders"])
+    s1 = pipeline.execute("demo")
+    assert s1.status == "passed"
+    assert s1.scope is not None and s1.scope.selfhosted == ["orders", "receipts"]
+    assert "kv.resource()" in app_text("demo", "app/db.py")
+    assert "storage.s3_client()" in app_text("demo", "app/storage.py")
+    assert 'boto3.client("sqs")' in app_text("demo", "app/queue.py")
+
+    # Step 2: + order_events -> full self-hosted
+    pipeline._set_active_stack("demo")
+    s2 = pipeline.move_over("demo", ["order_events"])
+    assert s2.status == "passed" and s2.scope is None
+    assert "queue.client()" in app_text("demo", "app/queue.py")
+    assert len(s2.steps) == 1 and s2.steps[0].action == "move_over"
+
+    # Step 3: - orders -> orders back on DynamoDB, queue + receipts stay self-hosted
+    pipeline._set_active_stack("demo")
+    s3 = pipeline.move_back("demo", ["orders"])
+    assert s3.status == "passed" and s3.scope is not None
+    assert s3.scope.selfhosted == ["order_events", "receipts"]
+    assert 'boto3.resource("dynamodb"' in app_text("demo", "app/db.py")
+    assert "queue.client()" in app_text("demo", "app/queue.py")
+    assert "storage.s3_client()" in app_text("demo", "app/storage.py")
+    assert len(s3.steps) == 2 and [st.action for st in s3.steps] == ["move_over", "move_back"]
+
+    # Finally: roundtrip the hybrid run
+    pipeline._set_active_stack("demo")
+    rt = pipeline.roundtrip("demo")
+    assert rt.roundtrip == "passed"
+    assert moves.moves[-1] == ("leaseweb->aws", ["order_events", "receipts"])
+
+

@@ -85,7 +85,7 @@ def _section(kicker: str, title: str, lead: str) -> None:
 
 
 # Traffic-light rules, from docs/02 §4 (B's boomerang/assess.py). Each row:
-# (service, feature, why it gets this light, what happens on Leaseweb, what handles it)
+# (service, feature, why it gets this light, what happens self-hosted, what handles it)
 _LIGHTS = [
     ("green", "Config only", "Same API on the other side. Only the endpoint and keys change.", [
         ("S3", "Basic object operations", "put, get, list, delete and head work the same on any S3-compatible store.",
@@ -129,7 +129,7 @@ def _lights_board() -> str:
             f'<div class="lt-pop-h"><span class="lt-pop-l">{label}</span><span class="lt-pop-s">{svc}</span></div>'
             f'<div class="lt-pop-t">{feat}</div>'
             f'<div class="lt-kv"><span>Why</span><p>{why}</p></div>'
-            f'<div class="lt-kv"><span>On Leaseweb</span><p>{target}</p></div>'
+            f'<div class="lt-kv"><span>Self-hosted</span><p>{target}</p></div>'
             f'<div class="lt-kv"><span>Handled by</span><p><code>{by}</code></p></div>'
             f'</div></div>'
             for svc, feat, why, target, by in rows
@@ -163,7 +163,8 @@ def render() -> None:
         <div class="bm-title">Leave AWS.<br>Prove it works. Come back.</div>
         <div class="bm-sub">
           Boomerang scans an AWS app, shows exactly what will break, moves it to a ready-to-run
-          <span class="bm-lw">Leaseweb</span> setup with a <b>local AI model</b>, proves it with the
+          self-hosted setup (your own servers, or a provider such as <span class="bm-lw">Leaseweb</span>)
+          with a <b>local AI model</b>, proves it with the
           app's own tests, moves the data, and can take it all back to
           <span class="bm-aws">AWS</span>.
         </div>
@@ -176,7 +177,7 @@ def render() -> None:
       <div class="lp-stats">
         <div class="lp-stat"><b>Local AI</b><span>The model runs on your laptop. Code and keys stay home.</span></div>
         <div class="lp-stat"><b>Your tests</b><span>The app's original tests are the proof. AI never edits them.</span></div>
-        <div class="lp-stat"><b>Round trip</b><span>AWS → Leaseweb → AWS, data included, counts checked.</span></div>
+        <div class="lp-stat"><b>Round trip</b><span>AWS → your servers → AWS, data included, counts checked.</span></div>
         <div class="lp-stat"><b>Honest costs</b><span>Published prices with sources, plus the hours to run it yourself.</span></div>
       </div>
     """)
@@ -215,7 +216,7 @@ def render() -> None:
          "Human", False, "approval.json"),
         ("De-lock", "Rewrites each function that calls AWS onto small, pre-tested adapters. S3 is just a config change.",
          "AI, one function at a time", True, "delock.json · diffs/"),
-        ("Leaseweb files", "Generates docker-compose, cloud-init, a deploy script, backups, scoped credentials and DEPLOY.md.",
+        ("Self-hosted files", "Generates docker-compose, cloud-init, a deploy script, backups, scoped credentials and DEPLOY.md. Runs on any server with Docker; Leaseweb is our example.",
          "Templates", False, "leaseweb/"),
         ("Verify", "Files valid, stack boots, the app's original tests pass, health check answers.",
          "Plain code", False, "tests passed"),
@@ -230,7 +231,7 @@ def render() -> None:
     side = (
         '<div class="tl-side">'
         '<div class="lp-kicker">How it works</div>'
-        '<div class="lp-h2">From AWS app to verified Leaseweb setup, in nine steps.</div>'
+        '<div class="lp-h2">From AWS app to a verified self-hosted setup, in nine steps.</div>'
         '<div class="lp-lead">Rules and templates do everything that must be exact. The AI only does what '
         'needs reading unfamiliar code, and every AI output is checked before it is used.</div>'
         '<div class="tl-read"><span class="tl-cur">01</span><span class="tl-of">/ 09</span></div>'
@@ -277,8 +278,8 @@ def render() -> None:
         <div class="lp-stop"><div class="where bm-aws">AWS</div>
           <div class="what">Original app and data. Scanned, never modified.</div></div>
         <div class="lp-arrow">→</div>
-        <div class="lp-stop"><div class="where bm-lw">Leaseweb</div>
-          <div class="what">Generated setup boots; original tests pass; data counts and checksums match.</div></div>
+        <div class="lp-stop"><div class="where bm-lw">Self-hosted</div>
+          <div class="what">Your servers, or a provider such as Leaseweb. Generated setup boots; original tests pass; data counts and checksums match.</div></div>
         <div class="lp-arrow">→</div>
         <div class="lp-stop"><div class="where bm-aws">Back to AWS</div>
           <div class="what">Original code, data copied back, tests again, and an explicit "what got lost" list.</div></div>

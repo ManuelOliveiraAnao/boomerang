@@ -25,7 +25,7 @@ _BOOMERANG_JS = """
   window.__bmBoom = true;
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const s = { mx: null, my: null, x: 0, y: 0, angle: 0, speed: 0, hover: false, t0: performance.now(), last: performance.now() };
-  const SPIN = 120;          // degrees per second at full spin (one turn ≈ 3 s)
+  const SPIN = 360;          // degrees per second at full spin (one turn per second)
   const PULL = 0.07, MAX = 40;
   document.addEventListener("mousemove", (e) => {
     s.mx = e.clientX; s.my = e.clientY;

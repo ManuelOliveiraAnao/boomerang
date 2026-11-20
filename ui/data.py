@@ -117,7 +117,15 @@ def stage_status(events: list[dict[str, Any]]) -> dict[str, str]:
 
 
 def llm_badge() -> tuple[str, bool]:
-    """Text for the LLM badge and whether inference is local."""
+    """Text for the LLM badge and whether it runs on our own model (on the laptop or on a
+    Leaseweb server, docs/17) rather than the cloud fallback. Uses the engine's settings, so
+    the badge says where the model really runs (BOOMERANG_LLM_LOCATION)."""
+    try:
+        from boomerang.config import load_settings
+        s = load_settings()
+        return s.llm_badge, s.provider == "ollama"
+    except Exception:  # engine missing or a bad setting: fall back to the environment
+        pass
     provider = os.getenv("BOOMERANG_LLM_PROVIDER", "ollama")
     model = os.getenv("BOOMERANG_MODEL", "qwen2.5-coder:7b")
     local = provider == "ollama"

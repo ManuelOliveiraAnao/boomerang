@@ -180,10 +180,9 @@ _LANDING_CSS = f"""
     content: ""; position: absolute; inset: -40px -10% auto; height: 420px; z-index: -1;
     background: radial-gradient(ellipse at 50% 0%, {ACCENT}33, transparent 60%);
   }}
-  .lp-mark {{ display: inline-block; margin-bottom: 18px; animation: lp-float 4s ease-in-out infinite;
+  .lp-mark {{ display: inline-block; margin-bottom: 18px; padding: 24px; cursor: grab;
     filter: drop-shadow(0 10px 30px {ACCENT}55); }}
-  @keyframes lp-float {{ 0%,100% {{ transform: translateY(0) rotate(0deg); }} 50% {{ transform: translateY(-8px) rotate(-3deg); }} }}
-  @media (prefers-reduced-motion: reduce) {{ .lp-mark {{ animation: none; }} }}
+  .lp-mark .bm-boom {{ display: inline-block; will-change: transform; }}
   .lp-hero .bm-title {{ font-size: clamp(2.4rem, 5.5vw, 4.2rem); margin: 18px auto 14px; }}
   .lp-hero .bm-sub {{ margin: 0 auto; font-size: 1.12rem; max-width: 680px; line-height: 1.55; }}
 

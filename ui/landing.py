@@ -16,6 +16,58 @@ def _html(s: str) -> None:
                 unsafe_allow_html=True)
 
 
+# Hero logo: bobs gently and drifts toward the cursor; spins slowly while hovered,
+# then eases back upright. One global loop survives Streamlit reruns.
+_BOOMERANG_JS = """
+<script>
+(() => {
+  if (window.__bmBoom) return;
+  window.__bmBoom = true;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const s = { mx: null, my: null, x: 0, y: 0, angle: 0, speed: 0, hover: false, t0: performance.now(), last: performance.now() };
+  const SPIN = 120;          // degrees per second at full spin (one turn ≈ 3 s)
+  const PULL = 0.07, MAX = 40;
+  document.addEventListener("mousemove", (e) => {
+    s.mx = e.clientX; s.my = e.clientY;
+    const mark = document.querySelector(".lp-mark.bm-follow");
+    if (!mark) return;
+    const r = mark.getBoundingClientRect();
+    s.hover = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  }, { passive: true });
+  document.addEventListener("mouseleave", () => { s.mx = null; s.hover = false; });
+  function frame(now) {
+    const dt = Math.min(0.05, (now - s.last) / 1000); s.last = now;
+    const mark = document.querySelector(".lp-mark.bm-follow");
+    const boom = mark && mark.querySelector(".bm-boom");
+    if (boom) {
+      const r = mark.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      let tx = 0, ty = 0;
+      if (s.mx !== null) {
+        tx = Math.max(-MAX, Math.min(MAX, (s.mx - cx) * PULL));
+        ty = Math.max(-MAX, Math.min(MAX, (s.my - cy) * PULL));
+      }
+      s.x += (tx - s.x) * Math.min(1, dt * 4);
+      s.y += (ty - s.y) * Math.min(1, dt * 4);
+      const target = s.hover ? SPIN : 0;
+      s.speed += (target - s.speed) * Math.min(1, dt * 2.5);
+      s.angle += s.speed * dt;
+      if (!s.hover && s.speed < 8) {             // settle back upright
+        const rest = Math.round(s.angle / 360) * 360;
+        s.angle += (rest - s.angle) * Math.min(1, dt * 3);
+      }
+      const bob = Math.sin((now - s.t0) / 700) * 5;
+      const tilt = s.speed < 8 ? Math.sin((now - s.t0) / 1400) * 3 : 0;
+      boom.style.transform = `translate(${s.x.toFixed(1)}px, ${(s.y + bob).toFixed(1)}px) rotate(${(s.angle + tilt).toFixed(1)}deg)`;
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+"""
+
+
 def _go_dashboard(key: str, label: str = "Open the dashboard →", primary: bool = True) -> None:
     _, mid, _ = st.columns([2, 1, 2])
     with mid:
@@ -35,7 +87,11 @@ def _section(kicker: str, title: str, lead: str) -> None:
 
 def render() -> None:
     # ---------------- hero ----------------
-    _html(f'<div class="lp-hero" style="padding-bottom:0"><span class="lp-mark">{logo_svg(72)}</span></div>')
+    # Our own static markup + script (no user input), so running its JS is safe.
+    # The SVG goes through st.markdown (st.html's sanitiser strips SVG); only the script uses st.html.
+    _html(f'<div class="lp-hero" style="padding-bottom:0"><span class="lp-mark bm-follow">'
+          f'<span class="bm-boom">{logo_svg(80)}</span></span></div>')
+    st.html(_BOOMERANG_JS, unsafe_allow_javascript=True)
     _html("""
       <div class="lp-hero" style="padding-top:0">
         <span class="bm-eyebrow"><b>InfraHack 2026</b>AI for sovereign cloud migration</span>

@@ -1,1 +1,1 @@
-"""Boomerang migration engine."""
+"""Boomerang: AI-assisted AWS <-> Leaseweb migration."""

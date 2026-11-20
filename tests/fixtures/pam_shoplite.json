@@ -1,0 +1,22 @@
+{
+  "pam_version": "0.2",
+  "app_name": "shoplite",
+  "platform": "aws",
+  "entrypoints": ["app.main:app", "app.worker:main"],
+  "components": [
+    {"id": "orders", "kind": "kv_table", "provider": "aws.dynamodb", "resource_name": "orders",
+     "name_env_var": "ORDERS_TABLE",
+     "partition_key": {"name": "order_id", "type": "S"},
+     "indexes": [{"name": "customer_id-index", "partition_key": {"name": "customer_id", "type": "S"}}],
+     "features": ["conditional_write", "gsi"]},
+    {"id": "receipts", "kind": "object_store", "provider": "aws.s3", "resource_name": "receipts",
+     "name_env_var": "RECEIPTS_BUCKET", "features": ["event_notification"]},
+    {"id": "order_events", "kind": "queue", "provider": "aws.sqs", "resource_name": "order-events",
+     "name_env_var": "ORDER_EVENTS_QUEUE", "max_receive_count": 3, "visibility_timeout_s": 30,
+     "features": ["dlq", "visibility_timeout"]},
+    {"id": "receipt_thumbnailer", "kind": "function", "provider": "aws.lambda", "resource_name": "receipt-thumbnailer"},
+    {"id": "shoplite_task", "kind": "identity", "provider": "aws.iam", "resource_name": "shoplite-task"}
+  ],
+  "files": [],
+  "env": []
+}

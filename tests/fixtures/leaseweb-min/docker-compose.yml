@@ -1,0 +1,15 @@
+# Minimal stand-in for B's generated Leaseweb setup (used to test the verifier).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: shoplite, POSTGRES_PASSWORD: "${PG_PASSWORD:-dev}", POSTGRES_DB: shoplite }
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U shoplite"], interval: 2s, retries: 30 }
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports: ["127.0.0.1:5672:5672"]
+    healthcheck: { test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"], interval: 3s, retries: 40 }
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: server -s3
+    ports: ["127.0.0.1:8333:8333"]

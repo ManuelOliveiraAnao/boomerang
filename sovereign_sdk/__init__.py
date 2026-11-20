@@ -1,1 +1,1 @@
-"""Deterministic adapters used by migrated Boomerang applications."""
+"""Small, tested adapters that mimic boto3 for self-hosted services."""

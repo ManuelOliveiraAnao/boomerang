@@ -77,7 +77,8 @@ class Step:
         return "\n".join(lines[-n:])
 
 
-def _args(name: str, run_id: str, app_dir: str, components: list[str] | None = None) -> list[str]:
+def _args(name: str, run_id: str, app_dir: str, components: list[str] | None = None,
+          args: list[str] | None = None) -> list[str]:
     """`components`: partial migration (docs/16): `approve --only a,b`, `move-over <id> a`, `move-back <id> a`."""
     only = ",".join(components or [])
     return {
@@ -87,11 +88,15 @@ def _args(name: str, run_id: str, app_dir: str, components: list[str] | None = N
         "roundtrip": ["roundtrip", run_id],
         "move-over": ["move-over", run_id, only, "--by", "ui"],
         "move-back": ["move-back", run_id, only, "--by", "ui"],
+        # Doctor (docs/18 §5): diagnose; apply one approved fix (args: action id, target); demo break (args: service)
+        "doctor": ["doctor", run_id],
+        "doctor-fix": ["doctor", "fix", run_id, *(args or []), "--by", "ui"],
+        "doctor-break": ["doctor", "break", run_id, *(args or [])],
     }[name]
 
 
 def start(name: str, run_id: str, app_dir: str = "sample-app/aws", then: list[str] | None = None,
-          components: list[str] | None = None) -> Step:
+          components: list[str] | None = None, args: list[str] | None = None) -> Step:
     """Start `boomerang <name>` for this run in the background; output goes to runs/<id>/ui-<name>.log."""
     cli = _cli()
     if cli is None:
@@ -102,7 +107,7 @@ def start(name: str, run_id: str, app_dir: str = "sample-app/aws", then: list[st
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "NO_COLOR": "1",
            "COLUMNS": "120"}
     with log.open("w", encoding="utf-8") as fh:
-        proc = subprocess.Popen(cli + _args(name, run_id, app_dir, components), cwd=ROOT, stdout=fh,
+        proc = subprocess.Popen(cli + _args(name, run_id, app_dir, components, args), cwd=ROOT, stdout=fh,
                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env)
     return Step(name=name, run_id=run_id, proc=proc, log=log, then=list(then or []))
 

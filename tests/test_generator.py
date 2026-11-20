@@ -19,7 +19,7 @@ def test_generator_writes_required_files(tmp_path):
     }
 
     files = render(pam, secrets, tmp_path)
-    relative_names = {path.relative_to(tmp_path).as_posix() for path in files}
+    relative_names = {generated.path for generated in files}
 
     assert "docker-compose.yml" in relative_names
     assert ".env.example" in relative_names
@@ -46,7 +46,7 @@ def test_generator_writes_required_files(tmp_path):
     assert definitions["permissions"][0]["vhost"] == "shoplite"
     assert any(
         queue["name"] == "order-events"
-        and queue["arguments"]["x-delivery-limit"] == 3
+        and queue["arguments"]["x-delivery-limit"] == 2
         for queue in definitions["queues"]
     )
 
@@ -181,3 +181,54 @@ def test_generated_schema_contains_index_for_gsi(tmp_path):
     assert 'CREATE TABLE IF NOT EXISTS "orders"' in schema
     assert 'CREATE INDEX IF NOT EXISTS "customer_id_index"' in schema
     assert '"customer_id" TEXT' in schema
+
+
+def test_generator_writes_laptop_env_with_real_local_endpoints(tmp_path):
+    pam = json.loads(
+        (Path(__file__).parents[1] / "fixtures" / "pam.aws.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    secrets = {
+        "POSTGRES_PASSWORD": "postgres-real-password",
+        "RABBITMQ_PASSWORD": "rabbitmq-real-password",
+        "SEAWEEDFS_ACCESS_KEY": "seaweed-access",
+        "SEAWEEDFS_SECRET_KEY": "seaweed-secret",
+    }
+
+    render(pam, secrets, tmp_path)
+    laptop_env = (tmp_path / "laptop.env").read_text(encoding="utf-8")
+
+    assert "postgres-real-password@127.0.0.1:5432" in laptop_env
+    assert "rabbitmq-real-password@127.0.0.1:5672" in laptop_env
+    assert "S3_ENDPOINT_URL=http://127.0.0.1:8333" in laptop_env
+    assert "CHANGE_ME" not in laptop_env
+
+
+def test_rabbitmq_definition_uses_shared_queue_arguments(tmp_path):
+    from sovereign_sdk.queue import queue_arguments
+
+    pam = json.loads(
+        (Path(__file__).parents[1] / "fixtures" / "pam.aws.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    secrets = {
+        "POSTGRES_PASSWORD": "postgres-password",
+        "RABBITMQ_PASSWORD": "rabbit-password",
+        "SEAWEEDFS_ACCESS_KEY": "access-key",
+        "SEAWEEDFS_SECRET_KEY": "secret-key",
+    }
+
+    render(pam, secrets, tmp_path)
+    definitions = json.loads(
+        (tmp_path / "rabbitmq" / "definitions.json").read_text(encoding="utf-8")
+    )
+    queues = {queue["name"]: queue for queue in definitions["queues"]}
+    expected = queue_arguments("order-events", 3)
+
+    assert queues["order-events-dlq"]["arguments"]["x-queue-type"] == "quorum"
+    assert queues["order-events"]["arguments"]["x-queue-type"] == expected["x-queue-type"]
+    assert queues["order-events"]["arguments"]["x-delivery-limit"] == expected["x-delivery-limit"]
+    assert queues["order-events"]["arguments"]["x-dead-letter-exchange"] == expected["x-dead-letter-exchange"]
+    assert queues["order-events"]["arguments"]["x-dead-letter-routing-key"] == expected["x-dead-letter-routing-key"]

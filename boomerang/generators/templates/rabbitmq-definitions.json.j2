@@ -16,25 +16,22 @@
       "read": ".*"
     }
   ],
-  "exchanges": [
-    {"name": "order-events-dlq", "vhost": "shoplite", "type": "direct", "durable": true}
-  ],
   "queues": [
     {
       "name": "order-events-dlq",
       "vhost": "shoplite",
       "durable": true,
-      "arguments": {"x-queue-type": "classic"}
+      "arguments": {"x-queue-type": "quorum"}
     },
     {
       "name": "order-events",
       "vhost": "shoplite",
       "durable": true,
       "arguments": {
-        "x-queue-type": "quorum",
-        "x-delivery-limit": 3,
-        "x-dead-letter-exchange": "order-events-dlq",
-        "x-dead-letter-routing-key": "order-events"
+        "x-queue-type": "{{ order_events_queue_arguments['x-queue-type'] }}",
+        "x-delivery-limit": {{ order_events_queue_arguments['x-delivery-limit'] }},
+        "x-dead-letter-exchange": "{{ order_events_queue_arguments['x-dead-letter-exchange'] }}",
+        "x-dead-letter-routing-key": "{{ order_events_queue_arguments['x-dead-letter-routing-key'] }}"
       }
     }
   ]

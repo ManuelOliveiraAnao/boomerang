@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from boomerang.models import Assessment, Finding, AppModel
+
 
 RULES = [
     ("object_store", "put", "green", "S3-compatible API; endpoint and keys change only"),
@@ -38,10 +40,10 @@ def _model_to_dict(value: Any) -> dict:
     return value
 
 
-def assess(pam: Any, emit: Any = None) -> dict:
+def assess(pam: AppModel | dict, emit: Any = None) -> Assessment:
     """Build deterministic traffic-light findings for a Portable App Model."""
     pam_dict = _model_to_dict(pam)
-    findings: list[dict] = []
+    findings: list[Finding] = []
 
     for component in pam_dict.get("components", []):
         features = list(component.get("features", []))
@@ -56,28 +58,29 @@ def assess(pam: Any, emit: Any = None) -> dict:
             if not matches:
                 continue
             light, what_changes = matches[0][2], matches[0][3]
-            findings.append(
-                {
+            findings.append(Finding.model_validate({
                     "analysis": what_changes,
                     "component_id": component["id"],
                     "feature": feature,
                     "light": light,
                     "what_changes": what_changes,
                     "evidence": component.get("usages", []),
-                }
-            )
+                }))
 
     severity = {"green": 0, "amber": 1, "red": 2}
     overall = max(
-        (finding["light"] for finding in findings),
+        (finding.light for finding in findings),
         key=lambda light: severity[light],
         default="green",
     )
-    result = {
+    result = Assessment.model_validate({
         "findings": findings,
         "overall": overall,
         "summary": f"{len(findings)} migration findings",
-    }
+    })
     if emit is not None:
-        emit("assess", "Traffic-light assessment completed", "success", findings=len(findings))
+        if hasattr(emit, "emit"):
+            emit.emit("assess", "Traffic-light assessment completed", "success", findings=len(findings))
+        else:
+            emit("assess", "Traffic-light assessment completed", "success", findings=len(findings))
     return result

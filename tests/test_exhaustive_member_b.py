@@ -94,7 +94,7 @@ def test_assessment_rule_matrix(kind, features, expected_light):
             ]
         }
     )
-    assert assessment["findings"][0]["light"] == expected_light
+    assert assessment.findings[0].light == expected_light
 
 
 @pytest.mark.parametrize(
@@ -118,7 +118,7 @@ def test_lost_report_status_matrix(light, status):
         ]
     }
     lost = build(pam, assessment)
-    assert lost[0]["status"] == status
+    assert lost[0].status == status
 
 
 @pytest.mark.parametrize(
@@ -148,10 +148,10 @@ def test_lost_report_adds_data_move_notes(notes):
     }
     lost = build(pam, assessment, data_moves)
     if notes:
-        assert lost[-1]["status"] == "changed"
-        assert lost[-1]["detail"] == "; ".join(notes)
+        assert lost[-1].status == "changed"
+        assert lost[-1].detail == "; ".join(notes)
     else:
-        assert lost[-1]["status"] == "preserved"
+        assert lost[-1].status == "preserved"
 
 
 @pytest.mark.parametrize(
@@ -173,7 +173,7 @@ def test_static_scanner_python_services(tmp_path, service, kind):
         encoding="utf-8",
     )
     pam = scan_static(app)
-    assert kind in {component["kind"] for component in pam["components"]}
+    assert kind in {component.kind for component in pam.components}
 
 
 @pytest.mark.parametrize(
@@ -196,7 +196,7 @@ def test_static_scanner_terraform_resource_matrix(tmp_path, resource, kind):
         encoding="utf-8",
     )
     pam = scan_static(app)
-    assert kind in {component["kind"] for component in pam["components"]}
+    assert kind in {component.kind for component in pam.components}
 
 
 @pytest.mark.parametrize(
@@ -213,7 +213,7 @@ def test_static_scanner_reads_aws_env(tmp_path, env_line):
     app.mkdir()
     (app / ".env.example").write_text(env_line + "\n", encoding="utf-8")
     pam = scan_static(app)
-    assert pam["env"][0]["name"] == env_line.split("=", 1)[0]
+    assert pam.env[0].name == env_line.split("=", 1)[0]
 
 
 @pytest.mark.parametrize(
@@ -229,7 +229,7 @@ def test_static_scanner_detects_implicit_iam(tmp_path, dockerfile):
     app.mkdir()
     (app / "Dockerfile").write_text(dockerfile, encoding="utf-8")
     pam = scan_static(app)
-    assert "implicit_iam_role" in {component["id"] for component in pam["components"]}
+    assert "implicit_iam_role" in {component.id for component in pam.components}
 
 
 @pytest.mark.parametrize(
@@ -245,7 +245,7 @@ def test_static_scanner_does_not_add_implicit_iam_with_explicit_aws(tmp_path, do
     app.mkdir()
     (app / "Dockerfile").write_text(dockerfile, encoding="utf-8")
     pam = scan_static(app)
-    assert "implicit_iam_role" not in {component["id"] for component in pam["components"]}
+    assert "implicit_iam_role" not in {component.id for component in pam.components}
 
 
 @pytest.mark.parametrize(

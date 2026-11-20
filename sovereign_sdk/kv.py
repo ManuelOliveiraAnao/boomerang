@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from decimal import Decimal
 from typing import Iterable
 
@@ -11,17 +12,24 @@ try:
 except ImportError:  # pragma: no cover - reported clearly at runtime
     psycopg = None
 
+try:
+    from botocore.exceptions import ClientError
+except ImportError:  # pragma: no cover - handled by project dependencies
+    ClientError = Exception
+
 
 class UnsupportedFeature(Exception):
     """Raised for DynamoDB expressions unsupported by the KV adapter."""
 
 
-class ConditionalCheckFailedException(Exception):
+class ConditionalCheckFailedException(ClientError):
     """Boto3-like exception for a failed conditional write."""
 
     def __init__(self) -> None:
-        super().__init__("Conditional check failed")
-        self.response = {"Error": {"Code": "ConditionalCheckFailedException"}}
+        super().__init__(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "Conditional check failed"}},
+            "PutItem",
+        )
 
 
 def _identifier(value: str) -> str:
@@ -141,22 +149,35 @@ def ddl(component: object) -> str:
 
 
 def resource(database_url: str | None = None) -> "KV":
-    """Create a KV resource using DATABASE_URL when no URL is supplied."""
+    """Create a lazy KV resource; the database connects on the first real operation."""
     if psycopg is None:
         raise RuntimeError("psycopg is required to use the KV adapter")
     database_url = database_url or os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is not configured")
-    connection = psycopg.connect(database_url)
-    return KV(connection)
+    return KV(database_url)
 
 
 class KV:
-    def __init__(self, connection) -> None:
-        self.connection = connection
+    def __init__(self, database_url: str | object) -> None:
+        self.database_url = (
+            str(database_url)
+            if not hasattr(database_url, "execute")
+            else None
+        )
+        self.connection = (
+            database_url if hasattr(database_url, "execute") else None
+        )
+        self._lock = threading.RLock()
+
+    def _get_connection(self):
+        with self._lock:
+            if self.connection is None or getattr(self.connection, "closed", False):
+                self.connection = psycopg.connect(self.database_url)
+            return self.connection
 
     def Table(self, name: str) -> "Table":
-        return Table(self.connection, name)
+        return Table(self, name)
 
     def close(self) -> None:
         self.connection.close()
@@ -182,11 +203,46 @@ def _condition_parse(expression: str | None) -> list[tuple[str, str, str]]:
 
 class Table:
     def __init__(self, connection, name: str) -> None:
-        self.connection = connection
+        self.owner = connection if isinstance(connection, KV) else None
+        self.connection = connection if hasattr(connection, "execute") else None
         self.name = _identifier(name)
 
+    def _connection(self):
+        if self.owner is not None:
+            return self.owner._get_connection()
+        if self.connection is None:
+            raise RuntimeError("No database connection is configured")
+        return self.connection
+
+    def _parse_query_condition(self, condition) -> tuple[str, object]:
+        if isinstance(condition, tuple) and len(condition) == 2:
+            key_name, value = condition
+            if isinstance(key_name, str):
+                return key_name, value
+
+        if hasattr(condition, "get_expression"):
+            expression = condition.get_expression()
+            values = expression.get("values", ())
+            if not values:
+                raise UnsupportedFeature("Only Key(...).eq(...) conditions are supported")
+            key_name = getattr(values[0], "name", None)
+            if not key_name:
+                return getattr(condition, "key_name", ""), getattr(condition, "value", None)
+            value = expression["value"] if "value" in expression else (
+                values[-1] if len(values) > 1 else None
+            )
+            return str(key_name), value
+
+        if hasattr(condition, "_values"):
+            key, value = condition._values
+            key_name = getattr(key, "name", None)
+            if key_name is not None:
+                return str(key_name), value
+
+        raise UnsupportedFeature("Only Key(...).eq(...) conditions are supported")
+
     def _data_columns(self) -> list[str]:
-        with self.connection.cursor() as cursor:
+        with self._connection().cursor() as cursor:
             cursor.execute(
                 """
                 SELECT column_name
@@ -199,7 +255,7 @@ class Table:
             return [str(row[0]) for row in cursor.fetchall()]
 
     def _partition_key(self) -> str:
-        with self.connection.cursor() as cursor:
+        with self._connection().cursor() as cursor:
             cursor.execute(
                 """
                 SELECT a.attname
@@ -222,7 +278,7 @@ class Table:
         partition_value = Item.get(partition_key)
         if partition_value is None:
             raise ValueError(f"Missing partition key {partition_key}")
-        with self.connection.cursor() as cursor:
+        with self._connection().cursor() as cursor:
             conditions = _condition_parse(ConditionExpression)
             if conditions:
                 name, mode, _ = conditions[0]
@@ -271,11 +327,11 @@ class Table:
                 f"{update_columns}",
                 (*values, _normalize_item(Item)),
             )
-        self.connection.commit()
+        self._connection().commit()
         return {}
 
     def _sort_key(self) -> str | None:
-        with self.connection.cursor() as cursor:
+        with self._connection().cursor() as cursor:
             cursor.execute(
                 """
                 SELECT a.attname
@@ -305,7 +361,7 @@ class Table:
                 raise ValueError(f"Missing sort key {sort_key}")
             sql += f" AND {_quoted(sort_key)} = %s"
             parameters.append(str(Key[sort_key]))
-        with self.connection.cursor() as cursor:
+        with self._connection().cursor() as cursor:
             cursor.execute(sql, parameters)
             row = cursor.fetchone()
         if not row:
@@ -358,14 +414,14 @@ class Table:
         column_names = ", ".join(_quoted(column) for column in replace_columns)
         placeholders = ", ".join(["%s"] * len(replace_columns))
         conflict_columns = ", ".join(_quoted(column) for column in columns)
-        with self.connection.cursor() as cursor:
+        with self._connection().cursor() as cursor:
             cursor.execute(
                 f"INSERT INTO {_quoted(self.name)} ({column_names}, data) "
                 f"VALUES ({placeholders}, %s::jsonb) "
                 f"ON CONFLICT ({conflict_columns}) DO UPDATE SET data = EXCLUDED.data, {set_sql}",
                 (*replace_values, _normalize_item(item)),
             )
-        self.connection.commit()
+        self._connection().commit()
 
     def delete_item(self, Key: dict) -> dict:
         partition_key = self._partition_key()
@@ -379,28 +435,26 @@ class Table:
                 raise ValueError(f"Missing sort key {sort_key}")
             sql += f" AND {_quoted(sort_key)} = %s"
             parameters.append(str(Key[sort_key]))
-        with self.connection.cursor() as cursor:
+        with self._connection().cursor() as cursor:
             cursor.execute(sql, parameters)
-        self.connection.commit()
+        self._connection().commit()
         return {}
 
     def query(self, KeyConditionExpression, IndexName=None) -> dict:
-        if not isinstance(KeyConditionExpression, tuple) or len(KeyConditionExpression) != 2:
-            raise UnsupportedFeature("Only Key(...).eq(...) conditions are supported")
-        key_name, value = KeyConditionExpression
+        key_name, value = self._parse_query_condition(KeyConditionExpression)
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key_name):
             raise UnsupportedFeature(f"Invalid query key: {key_name}")
         sql = f"SELECT data FROM {_quoted(self.name)} WHERE {_quoted(key_name)} = %s"
         if IndexName:
             # GSI columns are populated in put_item and selected directly.
             pass
-        with self.connection.cursor() as cursor:
+        with self._connection().cursor() as cursor:
             cursor.execute(sql, (str(value),))
             rows = cursor.fetchall()
         return {"Items": [_decode_item(row[0]) for row in rows]}
 
     def scan(self) -> dict:
-        with self.connection.cursor() as cursor:
+        with self._connection().cursor() as cursor:
             cursor.execute(f"SELECT data FROM {_quoted(self.name)}")
             rows = cursor.fetchall()
         return {"Items": [_decode_item(row[0]) for row in rows]}

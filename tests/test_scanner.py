@@ -12,11 +12,11 @@ def test_fixture_assessment_uses_rule_lights():
     pam = json.loads(fixture_path.read_text(encoding="utf-8"))
     assessment = assess(pam)
 
-    lights = {finding["light"] for finding in assessment["findings"]}
+    lights = {finding.light for finding in assessment.findings}
     assert {"green", "amber", "red"}.issubset(lights)
     assert score(pam) > 0
     lost = build(pam, assessment)
-    assert any(item["status"] == "lost" for item in lost)
+    assert any(item.status == "lost" for item in lost)
 
 
 def test_static_scanner_finds_boto3_calls(tmp_path):
@@ -37,11 +37,11 @@ def test_static_scanner_finds_boto3_calls(tmp_path):
     )
 
     pam = scan_static(app)
-    components = {component["id"]: component for component in pam["components"]}
+    components = {component.id: component for component in pam.components}
     assert "orders" in components
-    usage = components["orders"]["usages"][0]
-    assert usage["symbol"] == "put_order"
-    assert usage["operation"] == "put_item"
+    usage = components["orders"].usages[0]
+    assert usage.symbol == "put_order"
+    assert usage.operation == "put_item"
 
 
 def test_static_scanner_finds_s3_sqs_lambda_iam_and_alarm(tmp_path):
@@ -60,16 +60,16 @@ def test_static_scanner_finds_s3_sqs_lambda_iam_and_alarm(tmp_path):
     )
 
     pam = scan_static(app)
-    components = {component["id"]: component for component in pam["components"]}
+    components = {component.id: component for component in pam.components}
 
-    assert components["receipts"]["kind"] == "object_store"
-    assert components["order_events"]["kind"] == "queue"
+    assert components["receipts"].kind == "object_store"
+    assert components["order_events"].kind == "queue"
     assert {"visibility_timeout", "dlq"}.issubset(
-        set(components["order_events"]["features"])
+        set(components["order_events"].features)
     )
-    assert components["thumbnailer"]["kind"] == "function"
-    assert components["shoplite_task"]["kind"] == "identity"
-    assert components["dlq_not_empty"]["kind"] == "monitoring"
+    assert components["thumbnailer"].kind == "function"
+    assert components["shoplite_task"].kind == "identity"
+    assert components["dlq_not_empty"].kind == "monitoring"
 
 
 def test_assessment_and_lost_report_cover_unmigrated_features():
@@ -93,12 +93,12 @@ def test_assessment_and_lost_report_cover_unmigrated_features():
     }
 
     assessment = assess(pam)
-    lights = {(finding["component_id"], finding["light"]) for finding in assessment["findings"]}
+    lights = {(finding.component_id, finding.light) for finding in assessment.findings}
 
     assert ("receipts", "red") in lights
     assert ("thumbnailer", "red") in lights
     lost = build(pam, assessment)
-    assert all(item["status"] == "lost" for item in lost)
+    assert all(item.status == "lost" for item in lost)
 
 
 def test_lockin_score_weights_components_and_usage():
@@ -136,7 +136,7 @@ def test_assessment_emit_reports_result():
         emit=emit,
     )
 
-    assert assessment["overall"] == "amber"
+    assert assessment.overall == "amber"
     assert events == [
         (
             "assess",
@@ -150,8 +150,8 @@ def test_assessment_emit_reports_result():
 def test_assessment_empty_pam_is_green():
     assessment = assess({"components": []})
 
-    assert assessment["overall"] == "green"
-    assert assessment["findings"] == []
+    assert assessment.overall == "green"
+    assert assessment.findings == []
 
 
 def test_assessment_unknown_component_feature_is_not_invented():
@@ -169,8 +169,8 @@ def test_assessment_unknown_component_feature_is_not_invented():
         }
     )
 
-    assert assessment["findings"] == []
-    assert assessment["overall"] == "green"
+    assert assessment.findings == []
+    assert assessment.overall == "green"
 
 
 def test_static_scanner_deduplicates_repeated_usage(tmp_path):
@@ -188,11 +188,11 @@ def test_static_scanner_deduplicates_repeated_usage(tmp_path):
 
     pam = scan_static(app)
     orders = next(
-        component for component in pam["components"] if component["id"] == "orders"
+        component for component in pam.components if component.id == "orders"
     )
 
-    assert len({usage["operation"] for usage in orders["usages"]}) == 1
-    assert len({(usage["line"], usage["operation"]) for usage in orders["usages"]}) == 2
+    assert len({usage.operation for usage in orders.usages}) == 1
+    assert len({(usage.line, usage.operation) for usage in orders.usages}) == 2
 
 
 def test_static_scanner_ignores_unrelated_boto3_calls(tmp_path):
@@ -208,4 +208,4 @@ def test_static_scanner_ignores_unrelated_boto3_calls(tmp_path):
 
     pam = scan_static(app)
 
-    assert pam["components"] == []
+    assert pam.components == []

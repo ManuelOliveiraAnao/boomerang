@@ -13,6 +13,8 @@ except ImportError:  # pragma: no cover - install declared runtime dependency
     Environment = None
 
 from sovereign_sdk.kv import ddl
+from sovereign_sdk.queue import queue_arguments
+from boomerang.models import GeneratedFile
 
 
 TEMPLATE_DIR = Path(__file__).with_name("templates")
@@ -24,7 +26,7 @@ def _model_to_dict(value: Any) -> dict:
     return value
 
 
-def generate_secrets() -> dict[str, str]:
+def make_secrets(pam: Any = None) -> dict[str, str]:
     """Generate random credentials that are never sent to the LLM."""
     return {
         "POSTGRES_PASSWORD": secrets.token_urlsafe(24),
@@ -32,6 +34,11 @@ def generate_secrets() -> dict[str, str]:
         "SEAWEEDFS_ACCESS_KEY": secrets.token_urlsafe(24),
         "SEAWEEDFS_SECRET_KEY": secrets.token_urlsafe(32),
     }
+
+
+def generate_secrets() -> dict[str, str]:
+    """Backward-compatible alias for make_secrets."""
+    return make_secrets()
 
 
 def _render_template(name: str, context: dict[str, Any]) -> str:
@@ -45,17 +52,36 @@ def _render_template(name: str, context: dict[str, Any]) -> str:
     return environment.get_template(name).render(**context)
 
 
-def render(pam: Any, secret_values: dict[str, str] | None = None, out_dir: Path | None = None) -> list[Path]:
+def render(pam: Any, secret_values: dict[str, str] | None = None, out_dir: Path | None = None) -> list[GeneratedFile]:
     """Render every required Leaseweb target file and copy the sovereign SDK."""
     pam_dict = _model_to_dict(pam)
-    secret_values = secret_values or generate_secrets()
-    output_dir = Path(out_dir) if out_dir is not None else Path("runs") / "leaseweb"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    secret_values = secret_values or make_secrets(pam_dict)
+    rendered: dict[str, dict[str, Any]] = {}
+    generated: list[GeneratedFile] = []
 
-    (output_dir / "rabbitmq").mkdir(parents=True, exist_ok=True)
-    (output_dir / "seaweedfs").mkdir(parents=True, exist_ok=True)
-    (output_dir / "app").mkdir(parents=True, exist_ok=True)
-    (output_dir / "backup").mkdir(parents=True, exist_ok=True)
+    order_events = next(
+        (
+            component
+            for component in pam_dict.get("components", [])
+            if component.get("kind") == "queue"
+        ),
+        None,
+    )
+    max_receive_count = (
+        order_events.get("max_receive_count", 3)
+        if order_events
+        else 3
+    )
+    if max_receive_count is None:
+        max_receive_count = 3
+    # Secret values are never passed into prompt text; they are only used here.
+    output_dir = Path(out_dir) if out_dir is not None else Path("runs") / "leaseweb"
+    if out_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "rabbitmq").mkdir(parents=True, exist_ok=True)
+        (output_dir / "seaweedfs").mkdir(parents=True, exist_ok=True)
+        (output_dir / "app").mkdir(parents=True, exist_ok=True)
+        (output_dir / "backup").mkdir(parents=True, exist_ok=True)
 
     database_password = secret_values["POSTGRES_PASSWORD"]
     rabbit_password = secret_values["RABBITMQ_PASSWORD"]
@@ -68,6 +94,10 @@ def render(pam: Any, secret_values: dict[str, str] | None = None, out_dir: Path 
         "rabbit_password": rabbit_password,
         "access_key": access_key,
         "secret_key": secret_key,
+        "order_events_queue_arguments": queue_arguments(
+            "order-events",
+            max_receive_count,
+        ),
     }
 
     generated: list[Path] = []
@@ -92,6 +122,23 @@ def render(pam: Any, secret_values: dict[str, str] | None = None, out_dir: Path 
     secrets_path.write_text(secrets_env, encoding="utf-8")
     os.chmod(secrets_path, 0o600)
     generated.append(secrets_path)
+
+    laptop_env = "\n".join(
+        [
+            f"DATABASE_URL=postgresql://shoplite:{database_password}@127.0.0.1:5432/shoplite",
+            f"AMQP_URL=amqp://shoplite:{rabbit_password}@127.0.0.1:5672/shoplite",
+            "S3_ENDPOINT_URL=http://127.0.0.1:8333",
+            f"S3_ACCESS_KEY_ID={access_key}",
+            f"S3_SECRET_ACCESS_KEY={secret_key}",
+            "ORDERS_TABLE=orders",
+            "RECEIPTS_BUCKET=receipts",
+            "ORDER_EVENTS_QUEUE=order-events",
+        ]
+    ) + "\n"
+    laptop_env_path = output_dir / "laptop.env"
+    laptop_env_path.write_text(laptop_env, encoding="utf-8")
+    os.chmod(laptop_env_path, 0o600)
+    generated.append(laptop_env_path)
 
     kv_components = [
         component
@@ -156,4 +203,13 @@ def render(pam: Any, secret_values: dict[str, str] | None = None, out_dir: Path 
     shutil.copytree(sdk_source, sdk_target)
     generated.append(sdk_target)
 
-    return generated
+    return [
+        GeneratedFile(
+            path=path.relative_to(output_dir).as_posix() if path.is_relative_to(output_dir) else path.as_posix(),
+            content=path.read_text(encoding="utf-8") if path.is_file() else "",
+            executable=bool(path.is_file() and (os.stat(path).st_mode & 0o111)),
+            secret=path.name == "secrets.env",
+        )
+        for path in generated
+        if path.is_file() or path.is_dir() is False
+    ]

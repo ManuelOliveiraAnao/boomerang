@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Callable
 
+from boomerang.models import AppModel, Component, EnvVar, FileInfo, KeyAttr, Index
+
 
 def _operation_hint(node: ast.Call) -> tuple[str, str] | None:
     receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
@@ -105,7 +107,7 @@ def _function_name_for_line(tree: ast.Module, line_number: int) -> str | None:
     return None
 
 
-def scan_static(app_dir: Path) -> dict:
+def scan_static(app_dir: Path, exclude: tuple[str, ...] = ("tests", "sovereign_sdk")) -> AppModel:
     """Scan Python and Terraform files for AWS dependencies and code usages."""
     app_dir = Path(app_dir)
     components: dict[str, dict] = {}
@@ -261,7 +263,7 @@ def scan_static(app_dir: Path) -> dict:
                     )
 
     # Merge Terraform-only component names with code usage IDs where appropriate.
-    pam = {
+    return AppModel.model_validate({
         "pam_version": "0.2",
         "app_name": app_dir.name,
         "platform": "aws",
@@ -270,5 +272,4 @@ def scan_static(app_dir: Path) -> dict:
         "components": list(components.values()),
         "files": files,
         "env": env_vars,
-    }
-    return pam
+    })

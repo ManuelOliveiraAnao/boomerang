@@ -1,5 +1,5 @@
 """Leaseweb deployment file generators."""
 
-from .leaseweb import render
+from .leaseweb import make_secrets, render
 
-__all__ = ["render"]
+__all__ = ["make_secrets", "render"]

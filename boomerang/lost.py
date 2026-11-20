@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from boomerang.models import LostItem
+
 
 def _model_to_dict(value: Any) -> dict:
     if hasattr(value, "model_dump"):
@@ -9,13 +11,14 @@ def _model_to_dict(value: Any) -> dict:
     return value
 
 
-def build(pam: Any, assessment: Any, data_moves: list[Any] | Any = None) -> list[dict]:
+def build(pam: Any, assessment: Any, data_moves: list[Any] | Any = None) -> list[LostItem]:
     """Build a preserved/changed/lost report from findings and data moves."""
     pam_dict = _model_to_dict(pam)
     assessment_dict = _model_to_dict(assessment)
     result: list[dict] = []
 
-    for finding in assessment_dict.get("findings", []):
+    findings = assessment_dict.get("findings", [])
+    for finding in findings:
         result.append(
             {
                 "component_id": finding["component_id"],
@@ -53,4 +56,4 @@ def build(pam: Any, assessment: Any, data_moves: list[Any] | Any = None) -> list
                             "detail": "; ".join(count["notes"]),
                         }
                     )
-    return result
+    return [LostItem.model_validate(item) for item in result]

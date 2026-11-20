@@ -229,3 +229,34 @@ def test_decimal_values_round_trip(table):
 
     item = table.get_item({"order_id": "decimal-order"})["Item"]
     assert item["total_cents"] == Decimal("1234")
+
+
+def test_resource_is_lazy(monkeypatch):
+    calls = []
+
+    class FakeConnection:
+        closed = False
+
+    def fake_connect(database_url):
+        calls.append(database_url)
+        return FakeConnection()
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://test:test@127.0.0.1:55432/test")
+    monkeypatch.setattr("psycopg.connect", fake_connect)
+
+    kv = resource()
+    assert kv.connection is None
+    assert calls == []
+
+
+def test_boto3_key_condition_is_accepted():
+    from boto3.dynamodb.conditions import Key
+
+    from sovereign_sdk.kv import Table
+
+    table = Table(None, "orders")
+    condition = Key("customer_id").eq("customer-1")
+    assert table._parse_query_condition(condition) == (
+        "customer_id",
+        "customer-1",
+    )

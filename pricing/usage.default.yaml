@@ -1,0 +1,22 @@
+# Default monthly usage for ShopLite (editable in the UI). Assumptions, not measurements.
+orders_per_month: 100000
+reads_per_order: 3            # → DynamoDB reads, S3 GETs
+writes_per_order: 2           # → DynamoDB writes
+messages_per_order: 1         # → SQS: send + receive + delete = 3 requests per message
+receipts_per_order: 1         # → S3 PUTs
+receipt_kb: 2
+stored_gb_db: 5
+stored_gb_objects: 20
+egress_gb_month: 50
+migration_data_gb: 25         # one-off move out of AWS
+
+# AWS compute: api + worker on Fargate, running all month
+hours_per_month: 730
+aws_compute:
+  - { name: api,    vcpu: 0.5,  memory_gb: 1.0 }
+  - { name: worker, vcpu: 0.25, memory_gb: 0.5 }
+
+# Leaseweb: one instance runs api, worker, Postgres, RabbitMQ and SeaweedFS
+lw_instance: lw.instance.m3_large   # or lw.instance.m3_xlarge / lw.instance.c3_xlarge
+lw_disk_gb: 20                      # Network SSD for Postgres + RabbitMQ data (root disk is 5 GB)
+lw_objects_on: object_storage       # object_storage (Leaseweb Object Storage) | instance_disk (SeaweedFS on the server)

@@ -1,0 +1,257 @@
+{
+  "pam_version": "0.2",
+  "app_name": "ShopLite",
+  "platform": "aws",
+  "entrypoints": [],
+  "test_command": "pytest -q tests",
+  "components": [
+    {
+      "id": "order_events",
+      "kind": "queue",
+      "provider": "aws.sqs",
+      "resource_name": "sqs",
+      "name_env_var": null,
+      "partition_key": null,
+      "sort_key": null,
+      "indexes": [],
+      "fifo": false,
+      "max_receive_count": null,
+      "visibility_timeout_s": null,
+      "features": [
+        "send",
+        "receive",
+        "delete",
+        "visibility_timeout",
+        "dlq"
+      ],
+      "usages": [
+        {
+          "file": "app/queue.py",
+          "line": 19,
+          "symbol": "publish_order_created",
+          "operation": "send_message",
+          "snippet": "sqs.send_message(QueueUrl=_url(), MessageBody=json.dumps({\"order_id\": order_id}))"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 23,
+          "symbol": "receive_one",
+          "operation": "receive_message",
+          "snippet": "sqs.receive_message(QueueUrl=_url(), MaxNumberOfMessages=1,\n                               WaitTimeSeconds=wait_seconds, VisibilityTimeout=30)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 33,
+          "symbol": "ack",
+          "operation": "delete_message",
+          "snippet": "sqs.delete_message(QueueUrl=_url(), ReceiptHandle=receipt_handle)"
+        },
+        {
+          "file": "app/queue.py",
+          "line": 14,
+          "symbol": "_url",
+          "operation": "get_queue_url",
+          "snippet": "sqs.get_queue_url(QueueName=os.environ[\"ORDER_EVENTS_QUEUE\"])"
+        }
+      ]
+    },
+    {
+      "id": "receipts",
+      "kind": "object_store",
+      "provider": "aws.s3",
+      "resource_name": "s3",
+      "name_env_var": null,
+      "partition_key": null,
+      "sort_key": null,
+      "indexes": [],
+      "fifo": false,
+      "max_receive_count": null,
+      "visibility_timeout_s": null,
+      "features": [
+        "put",
+        "get",
+        "list",
+        "delete"
+      ],
+      "usages": [
+        {
+          "file": "app/storage.py",
+          "line": 16,
+          "symbol": "put_receipt",
+          "operation": "put_object",
+          "snippet": "s3.put_object(Bucket=_bucket(), Key=key, Body=json.dumps(receipt).encode(\"utf-8\"),\n                  ContentType=\"application/json\")"
+        },
+        {
+          "file": "app/storage.py",
+          "line": 23,
+          "symbol": "get_receipt",
+          "operation": "get_object",
+          "snippet": "s3.get_object(Bucket=_bucket(), Key=f\"receipts/{order_id}.json\")"
+        }
+      ]
+    },
+    {
+      "id": "receipt_thumbnailer",
+      "kind": "function",
+      "provider": "aws.lambda",
+      "resource_name": "receipt_thumbnailer",
+      "name_env_var": null,
+      "partition_key": null,
+      "sort_key": null,
+      "indexes": [],
+      "fifo": false,
+      "max_receive_count": null,
+      "visibility_timeout_s": null,
+      "features": [
+        "event_notification"
+      ],
+      "usages": []
+    },
+    {
+      "id": "orders",
+      "kind": "kv_table",
+      "provider": "aws.dynamodb",
+      "resource_name": "orders",
+      "name_env_var": null,
+      "partition_key": null,
+      "sort_key": null,
+      "indexes": [],
+      "fifo": false,
+      "max_receive_count": null,
+      "visibility_timeout_s": null,
+      "features": [
+        "put",
+        "get",
+        "update",
+        "delete",
+        "query",
+        "gsi"
+      ],
+      "usages": []
+    },
+    {
+      "id": "order_events_dlq",
+      "kind": "queue",
+      "provider": "aws.sqs",
+      "resource_name": "order_events_dlq",
+      "name_env_var": null,
+      "partition_key": null,
+      "sort_key": null,
+      "indexes": [],
+      "fifo": false,
+      "max_receive_count": null,
+      "visibility_timeout_s": null,
+      "features": [
+        "send",
+        "receive",
+        "delete",
+        "visibility_timeout",
+        "dlq"
+      ],
+      "usages": []
+    },
+    {
+      "id": "shoplite_task",
+      "kind": "identity",
+      "provider": "aws.iam",
+      "resource_name": "shoplite_task",
+      "name_env_var": null,
+      "partition_key": null,
+      "sort_key": null,
+      "indexes": [],
+      "fifo": false,
+      "max_receive_count": null,
+      "visibility_timeout_s": null,
+      "features": [
+        "role",
+        "policy"
+      ],
+      "usages": []
+    },
+    {
+      "id": "dlq_not_empty",
+      "kind": "monitoring",
+      "provider": "aws.cloudwatch",
+      "resource_name": "dlq_not_empty",
+      "name_env_var": null,
+      "partition_key": null,
+      "sort_key": null,
+      "indexes": [],
+      "fifo": false,
+      "max_receive_count": null,
+      "visibility_timeout_s": null,
+      "features": [
+        "alarm"
+      ],
+      "usages": []
+    }
+  ],
+  "files": [
+    {
+      "path": "Dockerfile",
+      "role": "config",
+      "component_ids": []
+    },
+    {
+      "path": "app/__init__.py",
+      "role": "app",
+      "component_ids": []
+    },
+    {
+      "path": "app/db.py",
+      "role": "app",
+      "component_ids": []
+    },
+    {
+      "path": "app/main.py",
+      "role": "app",
+      "component_ids": []
+    },
+    {
+      "path": "app/queue.py",
+      "role": "app",
+      "component_ids": [
+        "order_events"
+      ]
+    },
+    {
+      "path": "app/storage.py",
+      "role": "app",
+      "component_ids": [
+        "receipts"
+      ]
+    },
+    {
+      "path": "app/worker.py",
+      "role": "app",
+      "component_ids": []
+    }
+  ],
+  "env": [
+    {
+      "name": "AWS_REGION",
+      "value": "us-east-1",
+      "purpose": "AWS configuration"
+    },
+    {
+      "name": "AWS_DEFAULT_REGION",
+      "value": "us-east-1",
+      "purpose": "AWS configuration"
+    },
+    {
+      "name": "AWS_ENDPOINT_URL",
+      "value": "http://127.0.0.1:4566",
+      "purpose": "AWS configuration"
+    },
+    {
+      "name": "AWS_ACCESS_KEY_ID",
+      "value": "test",
+      "purpose": "AWS configuration"
+    },
+    {
+      "name": "AWS_SECRET_ACCESS_KEY",
+      "value": "test",
+      "purpose": "AWS configuration"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+psycopg[binary]>=3
+pika
+boto3

@@ -37,16 +37,12 @@ STUBS = [
     ("boomerang.datamover", "move", (None, "aws->leaseweb", {}, {}, None), {}, "A"),
     ("sovereign_sdk.queue", "client", (), {}, "A"),
     ("boomerang.cost", "estimate", ({}, {}, {}), {}, "D"),
-    ("boomerang.slicer", "replace_function", ("", None, "", "\n"), {}, "C"),
-    ("boomerang.rules", "check_module", ("", "a.py"), {}, "C"),
-    ("boomerang.delock", "delock_detailed", (P, None, None, None, P), {}, "C"),
     ("boomerang.fixer", "frames", ("",), {}, "C"),
     ("boomerang.report", "write", (None,), {}, "C"),
     ("boomerang.pipeline", "plan", (P,), {}, "C"),
     ("boomerang.pipeline", "approve", ("r1",), {}, "C"),
     ("boomerang.pipeline", "execute", ("r1",), {}, "C"),
     ("boomerang.pipeline", "roundtrip", ("r1",), {}, "C"),
-    ("sovereign_sdk.storage", "s3_client", (), {}, "C"),
 ]
 
 

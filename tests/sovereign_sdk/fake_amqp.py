@@ -1,8 +1,9 @@
 """In-memory stand-in for a pika BlockingChannel, for testing the queue adapter without RabbitMQ.
 
 Models the RabbitMQ behavior the adapter relies on: durable quorum queues, basic_get with manual
-ack, nack+requeue incrementing the delivery count, and dead-lettering once the count exceeds
-x-delivery-limit. Real-broker tests (same test file) confirm this model when Docker is available.
+ack, reject+requeue incrementing the delivery count (nack+requeue does not, measured on RabbitMQ 4),
+and dead-lettering once the count exceeds x-delivery-limit. The real-broker runs of the same tests
+confirm this model.
 """
 from __future__ import annotations
 
@@ -85,7 +86,8 @@ class FakeChannel:
         with self.b.lock:
             self.unacked.pop(delivery_tag)
 
-    def basic_nack(self, delivery_tag, requeue=True):
+    def basic_reject(self, delivery_tag, requeue=True):
+        """Counts towards x-delivery-limit; dead-letters once the count exceeds it (as RabbitMQ 4)."""
         self._check()
         with self.b.lock:
             queue, msg = self.unacked.pop(delivery_tag)
@@ -95,4 +97,12 @@ class FakeChannel:
             if limit is not None and msg["count"] > limit:
                 self.b.queues[args["x-dead-letter-routing-key"]].append(msg)
             elif requeue:
+                self.b.queues[queue].appendleft(msg)
+
+    def basic_nack(self, delivery_tag, requeue=True):
+        """Measured on RabbitMQ 4: nack+requeue does NOT count towards x-delivery-limit."""
+        self._check()
+        with self.b.lock:
+            queue, msg = self.unacked.pop(delivery_tag)
+            if requeue:
                 self.b.queues[queue].appendleft(msg)

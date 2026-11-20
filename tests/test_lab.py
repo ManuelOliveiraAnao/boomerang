@@ -56,12 +56,17 @@ def test_auto_backend_picks_process_without_docker(monkeypatch):
 
 
 def test_down_then_up_restarts_moto():
-    lab.up()
-    lab.down()
-    assert not lab.moto_ready()
-    lab.down()  # stopping twice is harmless
-    lab.up()
-    assert lab.moto_ready()
+    # restore whatever was running, so later tests (and teammates' tests) keep their databases
+    had_adapters = lab.status()["test-postgres"] and lab.status()["test-rabbitmq"]
+    try:
+        lab.up()
+        lab.down()
+        assert not lab.moto_ready()
+        lab.down()  # stopping twice is harmless
+        lab.up()
+        assert lab.moto_ready()
+    finally:
+        lab.up(adapters=had_adapters)
 
 
 def test_wait_for_moto_times_out(monkeypatch):

@@ -164,3 +164,90 @@ def test_real_boot_of_minimal_stack():
         assert c.ok, c.detail
     finally:
         verifier.teardown(MIN)
+
+
+# ---------------------------------------------------------------- added
+def test_junit_counts_skipped_tests(tmp_path):
+    d = _app(tmp_path, "import pytest\n\ndef test_ok():\n    pass\n\n"
+                       "@pytest.mark.skip(reason='x')\ndef test_skip():\n    pass\n")
+    r = verifier.run_pytest(d, d / "tests", {}, "leaseweb")
+    assert (r.passed, r.total, r.failed, r.errors) == (1, 2, 0, 0) and r.ok
+
+
+def test_no_tests_is_not_ok(tmp_path):
+    d = _app(tmp_path, "x = 1\n")
+    r = verifier.run_pytest(d, d / "tests", {}, "leaseweb")
+    assert r.total == 0 and not r.ok
+
+
+def test_traceback_is_trimmed(tmp_path):
+    d = _app(tmp_path, "def test_long():\n    raise AssertionError('\n'.join(str(i) for i in range(500)))\n")
+    r = verifier.run_pytest(d, d / "tests", {}, "leaseweb")
+    assert len(r.failures[0].traceback.splitlines()) <= 60
+
+
+def test_kv_tables_parsed_from_schema(tmp_path):
+    (tmp_path / "schema.sql").write_text(
+        'CREATE TABLE IF NOT EXISTS "orders" (order_id TEXT PRIMARY KEY, data JSONB NOT NULL);\n'
+        "create table events (id text primary key);\nCREATE INDEX orders_c ON orders (customer_id);\n",
+        encoding="utf-8")
+    assert verifier._kv_tables(tmp_path) == ["orders", "events"]
+
+
+def test_schema_check_without_schema_file_is_ok(tmp_path):
+    assert verifier.check_schema(tmp_path, {}).ok
+
+
+def test_schema_check_reports_unreachable_postgres(tmp_path):
+    (tmp_path / "schema.sql").write_text("CREATE TABLE orders (id text);", encoding="utf-8")
+    c = verifier.check_schema(tmp_path, {"DATABASE_URL": "postgresql://u:p@127.0.0.1:1/db"})
+    assert not c.ok and ("OperationalError" in c.detail or "ConnectionTimeout" in c.detail)
+
+
+def test_config_check_missing_compose(tmp_path):
+    c = verifier.check_config(tmp_path)
+    assert not c.ok and "docker-compose.yml missing" in c.detail
+
+
+def test_config_check_catches_bad_json(tmp_path):
+    shutil.copytree(MIN, tmp_path / "lw")
+    (tmp_path / "lw" / "definitions.json").write_text("{not json", encoding="utf-8")
+    assert not verifier.check_config(tmp_path / "lw").ok
+
+
+def test_config_check_reports_compose_errors(tmp_path, monkeypatch):
+    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def run(cmd, **kw):
+        if cmd[0] == "bash":
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return subprocess.CompletedProcess(cmd, 1, "", "service api: undefined volume")
+    c = verifier.check_config(MIN, run=run)
+    assert not c.ok and "undefined volume" in c.detail
+
+
+def test_laptop_env_with_no_files_is_empty(tmp_path):
+    assert verifier.laptop_env(tmp_path) == {}
+
+
+def test_read_env_file_handles_quotes_comments_and_blank_lines(tmp_path):
+    p = tmp_path / ".env"
+    p.write_text('# c\n\nA="1"\nB=\'two\'\nC=x # trailing\nD=a=b\nnot a pair\n', encoding="utf-8")
+    assert verifier.read_env_file(p) == {"A": "1", "B": "two", "C": "x", "D": "a=b"}
+
+
+def test_verify_emits_one_event_per_check(monkeypatch, health_server):
+    from boomerang.events import Emitter
+    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+    em = Emitter("t")
+    verifier.verify(MIN, run=FakeDocker(), health_url=health_server, emit=em)
+    assert [e.data["check"]["name"] for e in em.events] == ["config", "boot", "schema", "tests", "health"]
+
+
+def test_verify_reports_failing_app_tests(tmp_path, monkeypatch, health_server):
+    shutil.copytree(MIN, tmp_path / "lw")
+    (tmp_path / "lw/app/tests/test_min.py").write_text("def test_broken():\n    assert False\n", encoding="utf-8")
+    monkeypatch.setattr(verifier.shutil, "which", lambda name: f"/usr/bin/{name}")
+    v = verifier.verify(tmp_path / "lw", run=FakeDocker(), health_url=health_server)
+    tests = next(c for c in v.checks if c.name == "tests")
+    assert not tests.ok and tests.detail == "0/1 passed" and not v.ok

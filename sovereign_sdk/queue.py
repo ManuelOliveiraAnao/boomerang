@@ -23,7 +23,8 @@ import uuid
 from typing import Any, Callable
 
 import pika
-from pika.exceptions import AMQPConnectionError, ChannelClosed, ChannelClosedByBroker, ChannelWrongStateError, StreamLostError
+from pika.exceptions import (AMQPConnectionError, ChannelClosed, ChannelClosedByBroker, ChannelWrongStateError,
+                             StreamLostError, UnroutableError)
 
 DEFAULT_VISIBILITY_S = 30
 POLL_INTERVAL_S = 0.1
@@ -144,7 +145,10 @@ class Queue:
             ch.basic_publish(exchange="", routing_key=name, body=MessageBody.encode("utf-8"),
                              properties=pika.BasicProperties(delivery_mode=2, message_id=message_id),
                              mandatory=True)
-        self._call(body)
+        try:
+            self._call(body)
+        except UnroutableError as e:  # mandatory publish to a queue that does not exist
+            raise QueueDoesNotExist(name) from e
         return {"MessageId": message_id, "MD5OfMessageBody": _md5(MessageBody)}
 
     def receive_message(self, QueueUrl: str, MaxNumberOfMessages: int = 1, WaitTimeSeconds: int = 0,
@@ -185,7 +189,13 @@ class Queue:
             entry = self._inflight.pop(ReceiptHandle, None)
             if entry is None or not ReceiptHandle.startswith(f"{self._epoch}:"):
                 return {}  # expired (already redelivered) or from a dropped connection: nothing to ack
-            self._channel().basic_ack(delivery_tag=entry[0])
+            try:
+                self._ch.basic_ack(delivery_tag=entry[0])
+            except _RECONNECT_ERRORS:
+                # connection lost: the broker requeues the message, it will be delivered again
+                # (at-least-once, same as SQS when a delete fails)
+                self._ch = None
+                self._inflight.clear()
         return {}
 
     # ---------------------------------------------------------------- helpers

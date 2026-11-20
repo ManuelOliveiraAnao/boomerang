@@ -9,7 +9,10 @@ def process_once(wait_seconds: int = 1) -> str | None:
     if received is None:
         return None
     order_id, handle = received
-    db.set_status(order_id, "processed", datetime.now(timezone.utc).isoformat())
+    try:
+        db.set_status(order_id, "processed", datetime.now(timezone.utc).isoformat())
+    except db.OrderNotFound:
+        pass  # event for an unknown order: drop it instead of creating a ghost order
     queue.ack(handle)
     return order_id
 

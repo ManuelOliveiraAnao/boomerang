@@ -42,11 +42,19 @@ def aws_side(env: dict[str, str]) -> Side:
                 queue=lambda: boto3.client("sqs", **kw), wants_decimal=True)
 
 
+class MissingAdapter(RuntimeError):
+    """A sovereign_sdk adapter the Leaseweb side needs is not in the repo yet."""
+
+
 def leaseweb_side(env: dict[str, str]) -> Side:
     """Uses the same adapters the migrated app uses (kv: B, storage: C, queue: A)."""
     for k, v in env.items():  # adapters read their connection settings from the environment
         os.environ[k] = v
-    from sovereign_sdk import kv, queue
+    from sovereign_sdk import queue
+    try:
+        from sovereign_sdk import kv
+    except ImportError as e:
+        raise MissingAdapter("sovereign_sdk.kv (Postgres adapter, task B5) is not available yet") from e
     try:
         from sovereign_sdk.storage import s3_client
     except ImportError:  # fallback until storage.py lands

@@ -173,3 +173,121 @@ def test_queue_arguments_contract():
         "x-queue-type": "quorum", "x-delivery-limit": 2,
         "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "order-events-dlq"}
     assert q.queue_arguments("x", None) == {"x-queue-type": "quorum"}
+
+
+# ---------------------------------------------------------------- added: error paths and concurrency
+def test_send_to_missing_queue_raises_queue_does_not_exist(make):
+    c, _, _ = make()
+    with pytest.raises(q.QueueDoesNotExist):
+        c.send_message(QueueUrl="amqp:///no-such-" + uuid.uuid4().hex[:6], MessageBody="x")
+
+
+def test_receive_from_missing_queue_raises(make):
+    c, _, _ = make()
+    with pytest.raises(q.QueueDoesNotExist):
+        c.receive_message(QueueUrl="amqp:///no-such-" + uuid.uuid4().hex[:6])
+
+
+def test_long_poll_sees_message_whose_visibility_expires(make):
+    c, url, _ = make()
+    c.send_message(QueueUrl=url, MessageBody="x")
+    first = c.receive_message(QueueUrl=url, VisibilityTimeout=1)["Messages"][0]
+    t = time.monotonic()
+    again = c.receive_message(QueueUrl=url, WaitTimeSeconds=3)["Messages"][0]
+    assert again["MessageId"] == first["MessageId"]
+    assert 0.8 <= time.monotonic() - t < 2.5
+
+
+def test_concurrent_receive_and_delete_each_message_once(make):
+    c, url, name = make()
+    for i in range(60):
+        c.send_message(QueueUrl=url, MessageBody=str(i))
+    seen, lock = [], threading.Lock()
+
+    def consumer():
+        while True:
+            got = c.receive_message(QueueUrl=url, MaxNumberOfMessages=5)
+            if not got:
+                return
+            for m in got["Messages"]:
+                with lock:
+                    seen.append(m["Body"])
+                c.delete_message(QueueUrl=url, ReceiptHandle=m["ReceiptHandle"])
+    threads = [threading.Thread(target=consumer) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(seen, key=int) == [str(i) for i in range(60)]
+    assert c.depth(name) == 0
+
+
+def test_message_order_is_fifo_for_single_consumer(make):
+    c, url, _ = make()
+    for i in range(5):
+        c.send_message(QueueUrl=url, MessageBody=str(i))
+    bodies = [m["Body"] for m in c.receive_message(QueueUrl=url, MaxNumberOfMessages=5)["Messages"]]
+    assert bodies == ["0", "1", "2", "3", "4"]
+
+
+def test_unicode_and_large_bodies(make):
+    c, url, _ = make()
+    body = "ordre 🪃 ünïcödé " + "x" * 200_000
+    sent = c.send_message(QueueUrl=url, MessageBody=body)
+    got = c.receive_message(QueueUrl=url)["Messages"][0]
+    assert got["Body"] == body and got["MD5OfBody"] == sent["MD5OfMessageBody"]
+
+
+def test_dlq_receives_the_original_body(make):
+    c, url, name = make(max_receive_count=2)
+    c.send_message(QueueUrl=url, MessageBody="poison-pill")
+    for _ in range(4):
+        if not c.receive_message(QueueUrl=url, VisibilityTimeout=0):
+            break
+    c._expire()
+    dlq_url = c.get_queue_url(QueueName=q.dlq_name(name))["QueueUrl"]
+    assert c.receive_message(QueueUrl=dlq_url)["Messages"][0]["Body"] == "poison-pill"
+
+
+# ---------------------------------------------------------------- fake-only: connection loss
+def test_reconnects_after_connection_loss_and_redelivers():
+    broker = FakeBroker()
+    channels = []
+
+    def factory():
+        ch = broker.channel()
+        channels.append(ch)
+        return ch
+    c = q.Queue(url="amqp://unused", channel_factory=factory)
+    url = c.declare("lost")["QueueUrl"]
+    c.send_message(QueueUrl=url, MessageBody="m1")
+    got = c.receive_message(QueueUrl=url)["Messages"][0]
+    channels[-1].drop()                      # network blip while the message is in flight
+    # deleting with the old handle must not crash; the broker requeued the message
+    assert c.delete_message(QueueUrl=url, ReceiptHandle=got["ReceiptHandle"]) == {}
+    again = c.receive_message(QueueUrl=url)["Messages"][0]
+    assert again["Body"] == "m1" and len(channels) == 2   # reconnected exactly once
+    c.delete_message(QueueUrl=url, ReceiptHandle=again["ReceiptHandle"])
+    assert c.depth("lost") == 0
+
+
+def test_send_after_connection_loss_reconnects():
+    broker = FakeBroker()
+    channels = []
+
+    def factory():
+        ch = broker.channel()
+        channels.append(ch)
+        return ch
+    c = q.Queue(url="amqp://unused", channel_factory=factory)
+    url = c.declare("s")["QueueUrl"]
+    channels[-1].drop()
+    c.send_message(QueueUrl=url, MessageBody="after-drop")
+    assert c.depth("s") == 1 and len(channels) == 2
+
+
+def test_client_singleton_is_lazy(monkeypatch):
+    monkeypatch.setattr(q, "_client", None)
+    monkeypatch.setenv("AMQP_URL", "amqp://nobody:nothing@127.0.0.1:1/")
+    a, b = q.client(), q.client()
+    assert a is b and a._ch is None

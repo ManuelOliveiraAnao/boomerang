@@ -8,6 +8,18 @@ from boto3.dynamodb.conditions import Key
 dynamodb = boto3.resource("dynamodb")
 
 
+class OrderExists(Exception):
+    pass
+
+
+class OrderNotFound(Exception):
+    pass
+
+
+def _conditional_failed(err) -> bool:
+    return getattr(err, "response", {}).get("Error", {}).get("Code") == "ConditionalCheckFailedException"
+
+
 def _table():
     return dynamodb.Table(os.environ["ORDERS_TABLE"])
 
@@ -24,7 +36,12 @@ def _from_ddb(value):
 
 
 def put_order(order: dict) -> None:
-    _table().put_item(Item=order, ConditionExpression="attribute_not_exists(order_id)")
+    try:
+        _table().put_item(Item=order, ConditionExpression="attribute_not_exists(order_id)")
+    except Exception as e:
+        if _conditional_failed(e):
+            raise OrderExists(order["order_id"]) from e
+        raise
 
 
 def get_order(order_id: str) -> dict | None:
@@ -41,9 +58,15 @@ def list_orders_by_customer(customer_id: str) -> list[dict]:
 
 
 def set_status(order_id: str, status: str, processed_at: str) -> None:
-    _table().update_item(
-        Key={"order_id": order_id},
-        UpdateExpression="SET #s = :s, processed_at = :p",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={":s": status, ":p": processed_at},
-    )
+    try:
+        _table().update_item(
+            Key={"order_id": order_id},
+            UpdateExpression="SET #s = :s, processed_at = :p",
+            ConditionExpression="attribute_exists(order_id)",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": status, ":p": processed_at},
+        )
+    except Exception as e:
+        if _conditional_failed(e):
+            raise OrderNotFound(order_id) from e
+        raise

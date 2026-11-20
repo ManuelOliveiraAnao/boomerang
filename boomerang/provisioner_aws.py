@@ -24,7 +24,12 @@ def resource_names(pam: AppModel, run_tag: str | None = None) -> dict[str, str]:
     names = {}
     for c in pam.components:
         if c.kind in ("object_store", "kv_table", "queue"):
-            names[c.id] = f"{c.resource_name}-{run_tag}" if run_tag else c.resource_name
+            if not run_tag:
+                names[c.id] = c.resource_name
+            elif c.resource_name.endswith(".fifo"):
+                names[c.id] = f"{c.resource_name[:-5]}-{run_tag}.fifo"
+            else:
+                names[c.id] = f"{c.resource_name}-{run_tag}"
     return names
 
 
@@ -64,10 +69,15 @@ def _create_table(ddb, c: Component, name: str) -> None:
 
 def _create_queue(sqs, c: Component, name: str) -> None:
     attributes = {}
+    if c.fifo:
+        if not name.endswith(".fifo"):
+            raise ValueError(f"FIFO queue name must end with .fifo: {name}")
+        attributes["FifoQueue"] = "true"
     if c.visibility_timeout_s:
         attributes["VisibilityTimeout"] = str(c.visibility_timeout_s)
     if c.max_receive_count:
-        dlq_url = sqs.create_queue(QueueName=f"{name}-dlq")["QueueUrl"]
+        dlq = f"{name[:-5]}-dlq.fifo" if c.fifo else f"{name}-dlq"
+        dlq_url = sqs.create_queue(QueueName=dlq, Attributes={"FifoQueue": "true"} if c.fifo else {})["QueueUrl"]
         dlq_arn = sqs.get_queue_attributes(QueueUrl=dlq_url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
         attributes["RedrivePolicy"] = json.dumps({"deadLetterTargetArn": dlq_arn,
                                                   "maxReceiveCount": str(c.max_receive_count)})

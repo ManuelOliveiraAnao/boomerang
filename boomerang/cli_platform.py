@@ -122,7 +122,12 @@ def data_cmd(leaseweb_dir: str = typer.Argument(..., help="runs/<id>/leaseweb"),
     from . import datamover, provisioner_aws, verifier
     model = _load_pam(pam)
     aws_env = provisioner_aws.app_env(model, provisioner_aws.resource_names(model))
-    result = datamover.move(model, direction, aws_env, verifier.laptop_env(Path(leaseweb_dir)))
+    if direction not in ("aws->leaseweb", "leaseweb->aws"):
+        _fail(f"unknown direction {direction!r}: use aws->leaseweb or leaseweb->aws")
+    try:
+        result = datamover.move(model, direction, aws_env, verifier.laptop_env(Path(leaseweb_dir)))
+    except datamover.MissingAdapter as e:
+        _fail(str(e))
     for c in result.counts:
         console.print(f"{'[green]OK' if c.source_count == c.target_count and c.checksum_match else '[red]FAIL'}[/] "
                       f"{c.component_id}: {c.source_count} -> {c.target_count}")

@@ -11,7 +11,7 @@ import itertools
 import threading
 from types import SimpleNamespace
 
-from pika.exceptions import ChannelClosedByBroker
+from pika.exceptions import ChannelClosedByBroker, StreamLostError, UnroutableError
 
 
 class FakeBroker:
@@ -31,11 +31,24 @@ class FakeChannel:
         self.is_open = True
         self.unacked: dict[int, tuple[str, dict]] = {}
 
+    def drop(self):
+        """Simulate a lost TCP connection: unacked messages go back to their queues."""
+        with self.b.lock:
+            for queue, msg in self.unacked.values():
+                self.b.queues[queue].appendleft(msg)
+            self.unacked.clear()
+        self.dropped = True
+
+    def _check(self):
+        if getattr(self, "dropped", False):
+            raise StreamLostError("connection lost")
+
     def _closed(self, code, text):
         self.is_open = False
         raise ChannelClosedByBroker(code, text)
 
     def queue_declare(self, queue, passive=False, durable=False, arguments=None):
+        self._check()
         with self.b.lock:
             if passive:
                 if queue not in self.b.queues:
@@ -49,12 +62,14 @@ class FakeChannel:
             return SimpleNamespace(method=SimpleNamespace(message_count=len(self.b.queues[queue])))
 
     def basic_publish(self, exchange, routing_key, body, properties=None, mandatory=False):
+        self._check()
         with self.b.lock:
             if routing_key not in self.b.queues:
-                raise RuntimeError("unroutable")  # pika raises UnroutableError with mandatory=True
+                raise UnroutableError([])  # what pika raises for mandatory=True + confirms
             self.b.queues[routing_key].append({"body": body, "props": properties, "count": 0})
 
     def basic_get(self, queue, auto_ack=False):
+        self._check()
         with self.b.lock:
             if queue not in self.b.queues:
                 self._closed(404, f"NOT_FOUND - no queue '{queue}'")
@@ -66,10 +81,12 @@ class FakeChannel:
             return SimpleNamespace(delivery_tag=tag), msg["props"], msg["body"]
 
     def basic_ack(self, delivery_tag):
+        self._check()
         with self.b.lock:
             self.unacked.pop(delivery_tag)
 
     def basic_nack(self, delivery_tag, requeue=True):
+        self._check()
         with self.b.lock:
             queue, msg = self.unacked.pop(delivery_tag)
             msg["count"] += 1

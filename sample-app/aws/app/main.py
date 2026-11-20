@@ -36,7 +36,10 @@ def create_order(body: OrderIn):
         "status": "pending",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    db.put_order(order)
+    try:
+        db.put_order(order)
+    except db.OrderExists:
+        raise HTTPException(409, "order already exists")
     storage.put_receipt(order["order_id"], {"order_id": order["order_id"],
                                             "customer_id": order["customer_id"],
                                             "items": order["items"],

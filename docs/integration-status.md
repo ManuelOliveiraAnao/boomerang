@@ -66,12 +66,12 @@ Merged B's `member-b-partial-migration` (`e85c28f`: `Scope`/`ScopeStep` models, 
 | C | CLI: `boomerang approve <id> --only orders,receipts`, `migrate --only …`, `move-over <id> order_events`, `move-back <id> orders` | `cli.py` |
 | A | `datamover.move(..., components=[...])` (default: all, unchanged) | `datamover.py` |
 | B | hybrid env used `<aws-name>` placeholders, which overrode the queue name in `laptop.env`: now the real names; `assess` shares `scope.hybrid_finding` | `generators/leaseweb.py`, `assess.py` |
-| D | "What breaks": "Choose what moves" cards per movable component (🔴 listed, not movable), hybrid/all summary, notes (AWS credentials, no cross-side transactions, bucket events), "Approve and move N of M"; new **Placement** tab: AWS and self-hosted lanes, Move over / Move back on a passed live run, step history; **Costs**: all on AWS vs the chosen placement vs all self-hosted, per service, by scale (`cost.scenario()` / `compare()`) | `ui/components/breaks.py`, `ui/components/scope.py`, `ui/scope.py`, `ui/components/cost_compare.py`, `boomerang/cost.py`, `ui/runner.py` |
+| D | "What breaks": "Choose what moves" cards per movable component (🔴 listed, not movable), hybrid/all summary, notes (AWS credentials, no cross-side transactions, bucket events), "Approve and move N of M"; new **Placement** tab: AWS and self-hosted lanes, Move over / Move back on a passed live run, step history; **Costs**: all on AWS vs the chosen placement vs all self-hosted, per service, by scale (`cost.scenario()` / `compare()`); `cost.estimate(..., scope)` returns the same numbers as a hybrid column for the CLI (`cost --only`) | `ui/components/breaks.py`, `ui/components/scope.py`, `ui/scope.py`, `ui/components/cost_compare.py`, `boomerang/cost.py`, `ui/runner.py` |
 
 Full scope (the default) = the old behaviour; the other roles are called exactly as before. Lock-in before/after
 are scored with an empty scope (B's `score()` now excludes the scope; its default would drop every component).
-Tests: `tests/test_partial_migration.py` (14). Checked in the browser: unchecking `order_events` → "Approve: move
-2 of 3" → `approval.json` scope `[orders, receipts]` → `execute` uses it.
+Tests: `tests/test_partial_migration.py` (15), `tests/test_cost.py`, `tests/test_datamover.py`, `tests/test_verifier.py`.
+Checked in the browser: unchecking `order_events` → "Approve: move 2 of 3" → `approval.json` scope `[orders, receipts]` → `execute` uses it.
 
 **Not done / limits:** a real hybrid run (lab + Docker:
 the containers reach moto through `host.docker.internal`); during a hybrid verify the app's tests drain the
@@ -99,3 +99,21 @@ Checked on a Mac: `pytest tests` → **482 passed, 24 skipped**. Through `ui.run
 `approve --only orders,receipts` → `approval.json` scope `[orders, receipts]`; `move-over` is parsed and refused
 before a passed run; the dashboard shows the approval as Hybrid, 2 of 3. Not checked: a full live run (no Ollama
 on that laptop). `D` merges into `integration-abc` without conflicts.
+
+## Francisco's hybrid cost column merged into D — 20 Nov, 14:25
+
+`12f2746` (B) added a hybrid column inside `cost.compute(..., scope=)` while D's `cost.scenario()` already priced
+placements. Two models gave two hybrid totals for the same placement, so `D` keeps **one**:
+
+- **Kept from B:** the public API (`compute/estimate(..., scope=)`, `totals["hybrid"]` / `["hybrid_infra"]`,
+  `side == "hybrid"` lines) used by `boomerang cost --only`; the "(kept on AWS)" labels; the line name
+  "Ongoing AWS → self-hosted egress"; the hybrid line table in Costs (now for the placement picked in the
+  comparison); B's tests (`test_hybrid_cost_column_…`, `test_full_or_none_scope_…`), the CLI and pipeline changes,
+  and the new datamover / verifier / partial-migration tests, unchanged.
+- **Numbers now come from `scenario()`**, which `compute(scope=)` calls. Three differences from B's first version:
+  1. Traffic back to AWS is estimated from the kept services' reads and messages (`hybrid_traffic_gb`). B's default
+     `max(cross_gb, egress)` charged all internet egress to AWS as well as to the self-hosted side.
+  2. AWS ops time is the kept share (1 of 3 services kept → 1/3 of the AWS ops hours), not all of it.
+  3. One-off egress counts only the data that moves (`scenario()["one_off"]`).
+  B's ops assertion was updated accordingly (20 self-hosted + 10 × 1/3), and a new assertion checks that the CLI
+  column equals `scenario()`.

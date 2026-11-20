@@ -12,10 +12,22 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from boomerang import pipeline
+from boomerang import delock, pipeline, rules, slicer
 from boomerang.cli import app as cli_app
-from boomerang.events import read_events
-from boomerang.models import Approval, DataCount, DataMove, LostItem
+from boomerang.events import Emitter, read_events
+from boomerang.models import (
+    AppModel,
+    Approval,
+    Assessment,
+    CodeRef,
+    Component,
+    DataCount,
+    DataMove,
+    Finding,
+    FunctionRewrite,
+    KeyAttr,
+    LostItem,
+)
 from boomerang.pipeline import PipelineError
 from tests.test_pipeline import World, llm, root_of, source, world  # noqa: F401 - fixtures
 from tests.test_roundtrip import Trip, trip  # noqa: F401 - fixtures
@@ -216,3 +228,65 @@ def test_cli_only_move_over_and_move_back(world, source, moves, llm):
     assert back.exit_code == 0 and "order_events, receipts" in back.output
     assert runner.invoke(cli_app, ["move-back", "p1", "receipts,order_events"]).exit_code == 3
     assert runner.invoke(cli_app, ["approve", "p1", "--only", "receipt_thumbnailer"]).exit_code == 3
+
+
+# ---------- mixed function (docs/16 §3.1, §5) ----------
+
+def test_mixed_function_rewrites_in_scope_and_keeps_out_of_scope_boto3(tmp_path, fake_llm):
+    app = tmp_path / "run" / "leaseweb" / "app"
+    (app / "app").mkdir(parents=True)
+    code = '''\
+import boto3
+
+dynamodb = boto3.resource("dynamodb")
+orders = dynamodb.Table("orders")
+sqs = boto3.client("sqs")
+
+
+def load_and_notify(order_id):
+    resp = orders.get_item(Key={"order_id": order_id}, ConsistentRead=True)
+    sqs.send_message(QueueUrl="http://sqs/q", MessageBody=order_id)
+    return resp.get("Item")
+'''
+    (app / "app" / "mixed.py").write_text(code, encoding="utf-8")
+    rewritten = '''\
+def load_and_notify(order_id):
+    resp = orders.get_item(Key={"order_id": order_id})
+    sqs.send_message(QueueUrl="http://sqs/q", MessageBody=order_id)
+    return resp.get("Item")'''
+    fake_llm.responses["delock:app/mixed.py:load_and_notify"] = FunctionRewrite(
+        analysis="Dropped ConsistentRead on orders; kept sqs.send_message on AWS.",
+        new_source=rewritten,
+    )
+    pam = AppModel(
+        app_name="mixed", platform="aws", entrypoints=[], files=[], env=[],
+        components=[
+            Component(id="orders", kind="kv_table", provider="aws.dynamodb", resource_name="orders",
+                      partition_key=KeyAttr(name="order_id"),
+                      usages=[CodeRef(file="app/mixed.py", line=9, symbol="load_and_notify",
+                                      operation="get_item", snippet="orders.get_item(...)")]),
+            Component(id="order_events", kind="queue", provider="aws.sqs", resource_name="order-events",
+                      usages=[CodeRef(file="app/mixed.py", line=10, symbol="load_and_notify",
+                                      operation="send_message", snippet="sqs.send_message(...)")]),
+        ],
+    )
+    assessment = Assessment(overall="amber", summary="2 findings", findings=[
+        Finding(analysis="a", component_id="orders", feature="get", light="amber", what_changes="kv"),
+        Finding(analysis="a", component_id="order_events", feature="send", light="amber", what_changes="queue"),
+    ])
+    records = delock.delock_detailed(app, pam, assessment, Emitter("t"), tmp_path / "run" / "diffs",
+                                     scope=["orders"])
+    assert len(fake_llm.calls) == 1
+    assert "order_events (aws.sqs)" in fake_llm.calls[0]["user"]
+    assert "Calls to them must stay exactly as they are (boto3)." in fake_llm.calls[0]["user"]
+    fn_rec = next(r for r in records if r.function == "load_and_notify")
+    assert fn_rec.accepted and fn_rec.kind == "ai"
+    text = (app / "app" / "mixed.py").read_text(encoding="utf-8")
+    rules.check_module(text, "app/mixed.py")
+    assert "dynamodb = kv.resource()" in text
+    assert 'sqs = boto3.client("sqs")' in text
+    assert "import boto3" in text and "from sovereign_sdk import kv" in text
+    assert "queue" not in text
+    assert 'sqs.send_message(QueueUrl="http://sqs/q", MessageBody=order_id)' in text
+    assert "ConsistentRead" not in text
+

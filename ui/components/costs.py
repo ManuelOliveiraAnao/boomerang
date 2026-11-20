@@ -117,13 +117,15 @@ def _total_card(title: str, color: str, total: float | None, infra: float | None
 def render(src: Source, rows: list[dict] | None = None) -> None:
     prices, usage, ops = _defaults()
     u, o, migration_date, scale, base = _inputs(usage, ops)
+    # The placement priced line by line: the one picked in the comparison above, or else the run's scope.
+    scope = (src.summary.get("scope") or {}).get("selfhosted") or (src.json("approval") or {}).get("scope")
     if rows:
-        compare_section(src, rows, prices, u, o, migration_date, scale, base)
+        scope = compare_section(src, rows, prices, u, o, migration_date, scale, base)
         st.markdown('<div class="sc-kicker" style="margin-top:34px">Line by line</div>'
-                    '<div class="sc-title" style="font-size:1.05rem">All on AWS against all self-hosted, '
-                    'every price with its source</div>', unsafe_allow_html=True)
+                    '<div class="sc-title" style="font-size:1.05rem">Every price with its source</div>',
+                    unsafe_allow_html=True)
         st.write("")
-    r = cost.compute(prices, u, o, today=migration_date)
+    r = cost.compute(prices, u, o, today=migration_date, scope=scope)
 
     if r["missing"]:
         st.error("No total shown: these prices are missing from pricing/prices.yaml → "
@@ -132,15 +134,29 @@ def render(src: Source, rows: list[dict] | None = None) -> None:
     t = r["totals"] or {}
     aws_lines = [ln for ln in r["lines"] if ln["side"] == "aws" and ln["kind"] == "monthly"]
     lw_lines = [ln for ln in r["lines"] if ln["side"] == "leaseweb"]
+    hyb_lines = [ln for ln in r["lines"] if ln["side"] == "hybrid"]
     aws_ops = sum(ln["cost_eur"] or 0 for ln in aws_lines if ln["category"] == "ops")
     lw_ops = sum(ln["cost_eur"] or 0 for ln in lw_lines if ln["category"] == "ops")
+    hyb_ops = sum(ln["cost_eur"] or 0 for ln in hyb_lines if ln["category"] == "ops")
 
-    c1, c2 = st.columns(2)
-    c1.markdown(_total_card("AWS · eu-central-1", AWS_ORANGE, t.get("aws"), t.get("aws_infra"),
-                            f"ops {_eur(aws_ops)}"), unsafe_allow_html=True)
-    c2.markdown(_total_card("Leaseweb", LEASEWEB_RED, t.get("leaseweb"), t.get("leaseweb_infra"),
-                            f"ops {_eur(lw_ops)}"), unsafe_allow_html=True)
-    st.write("")
+    if rows:
+        pass  # the comparison above already shows the totals as cards
+    elif hyb_lines:
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(_total_card("AWS · eu-central-1", AWS_ORANGE, t.get("aws"), t.get("aws_infra"),
+                                f"ops {_eur(aws_ops)}"), unsafe_allow_html=True)
+        c2.markdown(_total_card(f"Hybrid ({', '.join(scope or [])})", LIGHT_COLORS["amber"], t.get("hybrid"),
+                                t.get("hybrid_infra"), f"ops {_eur(hyb_ops)}"), unsafe_allow_html=True)
+        c3.markdown(_total_card("Leaseweb (full)", LEASEWEB_RED, t.get("leaseweb"), t.get("leaseweb_infra"),
+                                f"ops {_eur(lw_ops)}"), unsafe_allow_html=True)
+    else:
+        c1, c2 = st.columns(2)
+        c1.markdown(_total_card("AWS · eu-central-1", AWS_ORANGE, t.get("aws"), t.get("aws_infra"),
+                                f"ops {_eur(aws_ops)}"), unsafe_allow_html=True)
+        c2.markdown(_total_card("Leaseweb", LEASEWEB_RED, t.get("leaseweb"), t.get("leaseweb_infra"),
+                                f"ops {_eur(lw_ops)}"), unsafe_allow_html=True)
+    if not rows:
+        st.write("")
 
     # ---- verdict ----
     if r["totals"]:
@@ -167,7 +183,10 @@ def render(src: Source, rows: list[dict] | None = None) -> None:
 
     st.markdown("#### AWS · monthly lines")
     _table(aws_lines)
-    st.markdown("#### Leaseweb · monthly lines")
+    if hyb_lines:
+        st.markdown(f"#### Your hybrid ({', '.join(scope or [])} on your servers) · monthly lines")
+        _table(hyb_lines)
+    st.markdown("#### All self-hosted (Leaseweb prices) · monthly lines")
     _table(lw_lines)
     st.markdown("#### One-off")
     _table([ln for ln in r["lines"] if ln["kind"] == "one_off"])

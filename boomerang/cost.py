@@ -88,8 +88,28 @@ class _Book:
         })
 
 
-def compute(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = None) -> dict:
-    """Monthly AWS vs Leaseweb costs, one-off migration costs and break-even.
+def _selfhosted_kinds(scope: Any) -> set[str] | None:
+    """Component kinds running self-hosted under `scope`, or None when not hybrid (all or empty)."""
+    if scope is None:
+        return None
+    raw = scope.selfhosted if hasattr(scope, "selfhosted") else (
+        scope.get("selfhosted") if isinstance(scope, dict) else list(scope)
+    )
+    if not raw:
+        return None
+    kind_map = {
+        "orders": "kv_table", "kv_table": "kv_table", "dynamodb": "kv_table", "db": "kv_table",
+        "receipts": "object_store", "object_store": "object_store", "s3": "object_store", "storage": "object_store",
+        "order_events": "queue", "order-events": "queue", "queue": "queue", "sqs": "queue",
+    }
+    kinds = {kind_map[str(item)] for item in raw if str(item) in kind_map}
+    all_kinds = {"kv_table", "object_store", "queue"}
+    return kinds if (kinds and kinds != all_kinds) else None
+
+
+def compute(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = None,
+            scope: Any = None) -> dict:
+    """Monthly AWS vs Leaseweb (and optional Hybrid) costs, one-off migration costs and break-even.
 
     Returns a dict with `lines`, `totals` (None when prices are missing), `missing`,
     `one_off`, `break_even_months`, `cheaper` and the assumptions used.
@@ -100,6 +120,7 @@ def compute(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = Non
     orders = float(u.get("orders_per_month", 0))
     hours = float(u.get("hours_per_month", 730))
     rate = float(o.get("hourly_rate_eur", 0))
+    hybrid_kinds = _selfhosted_kinds(scope)
 
     # ------------------------------------------------ AWS (monthly)
     reads = orders * float(u.get("reads_per_order", 0))
@@ -203,13 +224,27 @@ def compute(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = Non
 
     aws_m, lw_m = total("aws"), total("leaseweb")
     one_off = total("aws", "one_off")
-    if b.missing or aws_m is None or lw_m is None:
+
+    # Hybrid column (docs/16 §3.4): the same lines scenario() prices, so the CLI (`cost --only`) and
+    # the UI's placement comparison always agree. Lines kept on AWS are labelled as such.
+    hyb_m = hyb_infra = None
+    if hybrid_kinds is not None:
+        sc = scenario(prices, usage, ops, hybrid_kinds, today=today)
+        for ln in sc["lines"]:
+            kept = ln["side"] == "aws" and ln["component"] in MOVABLE
+            b.lines.append({**ln, "side": "hybrid", "item": ln["item"] + (" (kept on AWS)" if kept else "")})
+        b.missing |= set(sc["missing"])
+        hyb_m, hyb_infra = sc["total"], sc["infra"]
+    if b.missing or aws_m is None or lw_m is None or (hybrid_kinds is not None and hyb_m is None):
         totals = None
         break_even = cheaper = None
     else:
         totals = {"aws": aws_m, "leaseweb": lw_m, "difference": round(aws_m - lw_m, 2),
                   "aws_infra": total("aws", category="infra"),
                   "leaseweb_infra": total("leaseweb", category="infra")}
+        if hyb_m is not None:
+            totals["hybrid"] = hyb_m
+            totals["hybrid_infra"] = hyb_infra
         cheaper = "leaseweb" if lw_m < aws_m else "aws" if aws_m < lw_m else "equal"
         saving = aws_m - lw_m
         if one_off is None or saving <= 0:
@@ -296,9 +331,9 @@ def scenario(prices: dict, usage: dict, ops: dict, moved, *, today: dt.date | No
                 lines.append(ln)
         gb = hybrid_traffic_gb(usage, kept) if traffic_gb is None else float(traffic_gb)
         free = b.free("aws.egress.gb")
-        b.add("aws", "Traffic from AWS to your servers", "aws.egress.gb", max(0.0, gb - free), "GB",
-              note=f"~{gb:,.2f} GB / month the app reads from the AWS services it still uses; "
-                   f"first {free:g} GB free", component="egress")
+        b.add("aws", "Ongoing AWS → self-hosted egress", "aws.egress.gb", max(0.0, gb - free), "GB",
+              note=f"~{gb:,.2f} GB / month the app reads from the AWS services it still uses (not covered "
+                   f"by the EU Data Act switching rules); first {free:g} GB free", component="egress")
         lines += b.lines
 
     # One-off: only the data of what moves leaves AWS.
@@ -368,6 +403,7 @@ def scale_usage(usage: dict, factor: float) -> dict:
 CostReport = dict  # C1's stub names the return type CostReport; it's the dict compute() returns.
 
 
-def estimate(prices: dict, usage: dict, ops: dict, *, today: dt.date | None = None) -> CostReport:
+def estimate(prices: dict, usage: dict, ops: dict, scope: Any = None, *,
+             today: dt.date | None = None) -> CostReport:
     """C1's binding name (docs/03 §3.13): same as compute()."""
-    return compute(prices, usage, ops, today=today)
+    return compute(prices, usage, ops, today=today, scope=scope)

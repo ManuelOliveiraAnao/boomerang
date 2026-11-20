@@ -100,7 +100,7 @@ def _card(title: str, color: str, s: dict, base: dict, *, selected: bool, lowest
     rows = [f'<div class="cc-row"><span>vs all on AWS</span><b class="{d_cls}">{vs}</b></div>',
             f'<div class="cc-row"><span>One-off data move</span><b>{move}</b></div>']
     if s["mode"] == "hybrid":
-        traffic = next((ln for ln in s["lines"] if ln["item"].startswith("Traffic from AWS")), None)
+        traffic = next((ln for ln in s["lines"] if ln["item"].startswith("Ongoing AWS")), None)
         if traffic:
             rows.append(f'<div class="cc-row"><span>Traffic back to AWS</span><b>{_eur(traffic["cost_eur"])}</b></div>')
     return (f'<div class="cc-card{" sel" if selected else ""}"><div class="top"><span class="lbl"><i style="background:{color}"></i>'
@@ -181,13 +181,14 @@ def _chart(prices: dict, base_usage: dict, ops: dict, moved: list[str], today: d
 
 
 def compare_section(src: Source, rows: list[dict], prices: dict, usage: dict, ops: dict,
-                    today: dt.date, scale: float, base_usage: dict) -> None:
+                    today: dt.date, scale: float, base_usage: dict) -> list[str]:
+    """Render the comparison; returns the component ids picked to run on your servers."""
     st.markdown(scope_ui.CSS + CSS, unsafe_allow_html=True)
     mov = sc.movable(rows)
     ids = [r["id"] for r in mov]
     by_id = {r["id"]: r for r in mov}
     if not mov:
-        return
+        return []
 
     st.markdown('<div class="sc-kicker">Compare</div><div class="sc-title">What each placement costs</div>'
                 '<div class="sc-sub">Pick which services run on your servers. The rest stays on AWS. Prices are '
@@ -247,3 +248,4 @@ def compare_section(src: Source, rows: list[dict], prices: dict, usage: dict, op
         st.altair_chart(chart, width="stretch")
         st.markdown(f'<div class="cc-insight">{note} The dotted line is the scale set under '
                     f'"Your usage and assumptions" (×{scale:g}).</div>', unsafe_allow_html=True)
+    return picked

@@ -323,3 +323,14 @@ def test_find_bash_skips_the_wsl_launcher(monkeypatch):
     for var in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
         monkeypatch.delenv(var, raising=False)
     assert verifier.find_bash() is None
+
+
+def test_reset_data_on_partial_stack_leaves_aws_untouched(tmp_path):
+    """docs/16 §5: reset_data reads schema.sql and definitions.json, so an empty/partial stack
+    with only AWS env vars never touches AWS."""
+    (tmp_path / "laptop.env").write_text(
+        "AWS_REGION=us-east-1\nAWS_ENDPOINT_URL=http://127.0.0.1:4566\nORDER_EVENTS_QUEUE=order-events\n",
+        encoding="utf-8",
+    )
+    removed = verifier.reset_data(tmp_path)
+    assert removed == {"rows": 0, "messages": 0, "objects": 0}
